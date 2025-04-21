@@ -168,7 +168,9 @@ func initLogger(config *CleverChattyConfig) (*log.Logger, error) {
 	// Initialize the logger with the specified log file path
 	var logger *log.Logger
 
-	if config.LogFilePath != "" {
+	if config.LogFilePath == "stdout" {
+		logger = log.New(os.Stdout, "", log.LstdFlags)
+	} else if config.LogFilePath != "" {
 		f1, err := os.OpenFile(config.LogFilePath, os.O_RDWR|os.O_CREATE|os.O_APPEND, 0666)
 
 		if err != nil {
@@ -176,8 +178,6 @@ func initLogger(config *CleverChattyConfig) (*log.Logger, error) {
 		}
 
 		logger = log.New(f1, "", log.LstdFlags)
-	} else if config.LogFilePath == "stdout" {
-		logger = log.New(os.Stdout, "", log.LstdFlags)
 	} else {
 		logger = log.New(io.Discard, "", log.LstdFlags)
 	}
