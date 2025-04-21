@@ -22,7 +22,7 @@ func TestBasicChat(t *testing.T) {
 		return nil
 	})
 
-	err = cleverChattyObj.Prompt("Hello, how are you?")
+	_, err = cleverChattyObj.Prompt("Hello, how are you?")
 
 	if err != nil {
 		t.Fatalf("Failed to prompt: %v", err)
@@ -65,7 +65,7 @@ func TestChatWithTool(t *testing.T) {
 		return nil
 	})
 
-	err = cleverChattyObj.Prompt("tool:1:Hello, how are you?")
+	_, err = cleverChattyObj.Prompt("tool:1:Hello, how are you?")
 
 	if err != nil {
 		t.Fatalf("Failed to prompt: %v", err)

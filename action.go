@@ -70,14 +70,14 @@ func (assistant *CleverChatty) pruneMessages() {
 }
 
 // Method implementations for simpleMessage
-func (assistant *CleverChatty) Prompt(prompt string) error {
+func (assistant *CleverChatty) Prompt(prompt string) (string, error) {
 
 	assistant.pruneMessages()
 
 	// Display the user's prompt if it's not empty (i.e., not a tool response)
 	if prompt != "" {
 		if err := assistant.Callbacks.callStartedPromptProcessing(prompt); err != nil {
-			return fmt.Errorf("error in callback: %v", err)
+			return "", fmt.Errorf("error in callback: %v", err)
 		}
 
 		assistant.messages = append(
@@ -106,9 +106,7 @@ func (assistant *CleverChatty) Prompt(prompt string) error {
 	}
 
 	for {
-		if err := assistant.Callbacks.callStartedThinking(); err != nil {
-			return fmt.Errorf("error in callback: %v", err)
-		}
+		assistant.Callbacks.callStartedThinking()
 
 		type result struct {
 			message llm.Message
@@ -141,7 +139,7 @@ func (assistant *CleverChatty) Prompt(prompt string) error {
 			// Check if it's an overloaded error
 			if strings.Contains(err.Error(), "overloaded_error") {
 				if retries >= maxRetries {
-					return fmt.Errorf(
+					return "", fmt.Errorf(
 						"claude is currently overloaded. please wait a few minutes and try again",
 					)
 				}
@@ -157,7 +155,7 @@ func (assistant *CleverChatty) Prompt(prompt string) error {
 				continue
 			}
 			// If it's not an overloaded error, return the error immediately
-			return err
+			return "", err
 		}
 		// If we got here, the request succeeded
 		break
@@ -170,9 +168,8 @@ func (assistant *CleverChatty) Prompt(prompt string) error {
 
 	// Add text content
 	if message.GetContent() != "" {
-		if err := assistant.Callbacks.callResponseReceived(message.GetContent()); err != nil {
-			return fmt.Errorf("error in callback: %v", err)
-		}
+		assistant.Callbacks.callResponseReceived(message.GetContent())
+
 		messageContent = append(messageContent, history.ContentBlock{
 			Type: "text",
 			Text: message.GetContent(),
@@ -242,9 +239,7 @@ func (assistant *CleverChatty) Prompt(prompt string) error {
 
 		}()
 
-		if err := assistant.Callbacks.callToolCalling(toolCall.GetName()); err != nil {
-			return fmt.Errorf("error in callback: %v", err)
-		}
+		assistant.Callbacks.callToolCalling(toolCall.GetName())
 
 		select {
 		case res := <-resultCh:
@@ -262,9 +257,7 @@ func (assistant *CleverChatty) Prompt(prompt string) error {
 				toolName,
 				err,
 			)
-			if err := assistant.Callbacks.callToolCallFailed(toolCall.GetName(), err); err != nil {
-				return fmt.Errorf("error in callback: %v", err)
-			}
+			assistant.Callbacks.callToolCallFailed(toolCall.GetName(), err)
 
 			// Add error message as tool result
 			toolResults = append(toolResults, history.ContentBlock{
@@ -321,5 +314,5 @@ func (assistant *CleverChatty) Prompt(prompt string) error {
 		return assistant.Prompt("")
 	}
 
-	return nil
+	return message.GetContent(), nil
 }
