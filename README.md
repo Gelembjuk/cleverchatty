@@ -13,6 +13,63 @@
 
 This package is ideal for developers building custom UIs (e.g., CLI, web, mobile) that require AI chat capabilities without duplicating logic across implementations.
 
+## Models 
+
+The package works with any models supports by Ollama. Also: OpenAI, Anthropic and Google models by APIs.
+
+## Example
+
+```golang
+package main
+
+import (
+	"context"
+	"fmt"
+	"os"
+
+	"github.com/gelembjuk/cleverchatty"
+)
+
+func main() {
+	config := cleverchatty.CleverChattyConfig{
+		Model: "ollama:qwen2.5:3b",
+		MCPServers: map[string]cleverchatty.ServerConfigWrapper{
+			"weather_server": {
+				Config: cleverchatty.SSEServerConfig{
+					Url: "http://weather-service:8000/mcp",
+				},
+			},
+			"get_location_server": {
+				Config: cleverchatty.STDIOServerConfig{
+					Command: "get_location",
+					Args:    []string{"--location"},
+				},
+			},
+		},
+	}
+
+	cleverChattyObject, err := cleverchatty.GetCleverChatty(config, context.Background())
+
+	if err != nil {
+		fmt.Errorf("Error creating assistant: %v", err)
+		os.Exit(1)
+	}
+	defer func() {
+		cleverChattyObject.Finish()
+	}()
+
+	response, err := cleverChattyObject.Prompt("What is the weather like outside today?")
+
+	if err != nil {
+		fmt.Errorf("Error getting response: %v", err)
+		os.Exit(1)
+	}
+	fmt.Println("Response:", response)
+
+}
+
+```
+
 ## Credits
 
 The first version of this application was the copy of [mcphost](https://github.com/mark3labs/mcphost) refactored to remove the UI.
