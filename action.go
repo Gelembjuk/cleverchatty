@@ -69,9 +69,12 @@ func (assistant *CleverChatty) pruneMessages() {
 	assistant.messages = prunedMessages
 }
 
-func (assistant *CleverChatty) appendMessage(message history.HistoryMessage) {
-	assistant.messages = append(assistant.messages, message)
-	assistant.singlePromptMessages = append(assistant.singlePromptMessages, message)
+func (assistant *CleverChatty) addToMemory(role string, content string) {
+	// TODO. Add timeouts to context
+	assistant.mcpHost.Remember(role, history.ContentBlock{
+		Type: "text",
+		Text: content,
+	}, context.Background())
 }
 
 func (assistant *CleverChatty) injectMemories() {
@@ -92,7 +95,7 @@ func (assistant *CleverChatty) injectMemories() {
 		}
 	}
 	if !replaced {
-		assistant.appendMessage(history.NewMemoryNoteMessage(memories))
+		assistant.messages = append(assistant.messages, history.NewMemoryNoteMessage(memories))
 	}
 }
 
@@ -103,27 +106,19 @@ func (assistant *CleverChatty) Prompt(prompt string) (string, error) {
 	}
 
 	assistant.pruneMessages()
-	assistant.singlePromptMessages = make([]history.HistoryMessage, 0)
 
 	assistant.Callbacks.callStartedPromptProcessing(prompt)
 
 	assistant.injectMemories()
 
-	assistant.appendMessage(history.HistoryMessage{
-		Role: "user",
-		Content: []history.ContentBlock{{
-			Type: "text",
-			Text: prompt,
-		}},
-	})
+	assistant.messages = append(assistant.messages, history.NewUserPromptMessage(prompt))
 
 	response, err := assistant.processPrompt(prompt)
 	if err != nil {
 		return "", err
 	}
 	// time to refresh the memory
-	assistant.mcpHost.Rerember(assistant.singlePromptMessages, context.Background())
-	assistant.singlePromptMessages = make([]history.HistoryMessage, 0)
+	assistant.addToMemory("user", prompt)
 
 	return response, nil
 }
@@ -200,10 +195,8 @@ func (assistant *CleverChatty) processPrompt(prompt string) (string, error) {
 		break
 	}
 
-	var messageContent []history.ContentBlock
-
 	toolResults := []history.ContentBlock{}
-	messageContent = []history.ContentBlock{}
+	messageContent := []history.ContentBlock{}
 
 	// Add text content
 	if message.GetContent() != "" {
@@ -213,6 +206,8 @@ func (assistant *CleverChatty) processPrompt(prompt string) (string, error) {
 			Type: "text",
 			Text: message.GetContent(),
 		})
+
+		assistant.addToMemory("assistant", message.GetContent())
 	}
 
 	// Handle tool calls
@@ -299,14 +294,13 @@ func (assistant *CleverChatty) processPrompt(prompt string) (string, error) {
 			toolResults = append(toolResults, resultBlock)
 		}
 	}
-	assistant.appendMessage(history.HistoryMessage{
+	assistant.messages = append(assistant.messages, history.HistoryMessage{
 		Role:    message.GetRole(),
 		Content: messageContent,
 	})
 
 	if len(toolResults) > 0 {
-
-		assistant.appendMessage(history.HistoryMessage{
+		assistant.messages = append(assistant.messages, history.HistoryMessage{
 			Role:    "user",
 			Content: toolResults,
 		})

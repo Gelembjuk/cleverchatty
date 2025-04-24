@@ -16,14 +16,13 @@ import (
 )
 
 type CleverChatty struct {
-	context              context.Context
-	config               CleverChattyConfig
-	logger               *log.Logger
-	provider             llm.Provider
-	mcpHost              *MCPHost
-	messages             []history.HistoryMessage
-	singlePromptMessages []history.HistoryMessage
-	Callbacks            uiCallbacks
+	context   context.Context
+	config    CleverChattyConfig
+	logger    *log.Logger
+	provider  llm.Provider
+	mcpHost   *MCPHost
+	messages  []history.HistoryMessage
+	Callbacks uiCallbacks
 }
 
 func GetCleverChatty(config CleverChattyConfig, ctx context.Context) (*CleverChatty, error) {

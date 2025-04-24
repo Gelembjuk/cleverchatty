@@ -9,10 +9,12 @@ import (
 )
 
 const (
-	messageRoleUser      = "user"
-	messageRoleAssistant = "assistant"
-	messageRoleSystem    = "system"
-	messageSubroleMemory = "memory"
+	messageRoleUser            = "user"
+	messageRoleAssistant       = "assistant"
+	messageRoleSystem          = "system"
+	messageSubroleMemory       = "memory"
+	messageSubrolePrompt       = "prompt"
+	messageSubroleToolResponse = "tool_response"
 )
 
 // HistoryMessage implements the llm.Message interface for stored messages
@@ -30,6 +32,19 @@ func NewMemoryNoteMessage(content string) HistoryMessage {
 			{
 				Type: "text",
 				Text: content,
+			},
+		},
+	}
+}
+
+func NewUserPromptMessage(prompt string) HistoryMessage {
+	return HistoryMessage{
+		Role:    messageRoleUser,
+		SubRole: messageSubrolePrompt,
+		Content: []ContentBlock{
+			{
+				Type: "text",
+				Text: prompt,
 			},
 		},
 	}

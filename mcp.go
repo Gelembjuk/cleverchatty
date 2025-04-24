@@ -382,21 +382,25 @@ func (host MCPHost) getToolsInfo() []ServerInfo {
 }
 
 // if there is a memory MCP server, then it should be used. Send the messages to it
-func (host MCPHost) Rerember(lastMessages []history.HistoryMessage, ctx context.Context) error {
+// this is async, so the messages are not sent immediately
+func (host MCPHost) Remember(role string, content history.ContentBlock, ctx context.Context) {
 	if host.memoryServerName == "" {
-		return nil
+		return
 	}
 
 	// call the memory server to remember the messages
-	_, err := host.callTool(
-		host.memoryServerName,
-		memoryToolRememberName,
-		map[string]interface{}{
-			"data": lastMessages,
-		},
-		ctx,
-	)
-	return err
+	go func() {
+		// TODO: is it safe to send in a goroutine? maybe better to have some kind of mutex?
+		host.callTool(
+			host.memoryServerName,
+			memoryToolRememberName,
+			map[string]interface{}{
+				"role":    role,
+				"content": content,
+			},
+			ctx,
+		)
+	}()
 }
 
 // requests the memory server to recall the messages
