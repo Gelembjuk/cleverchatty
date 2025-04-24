@@ -2,11 +2,12 @@ package test
 
 import (
 	"context"
+	"log"
 	"strconv"
 	"strings"
 
-	"github.com/mark3labs/mcphost/pkg/history"
-	"github.com/mark3labs/mcphost/pkg/llm"
+	"github.com/gelembjuk/cleverchatty/history"
+	"github.com/gelembjuk/cleverchatty/llm"
 )
 
 type MockProvider struct {
@@ -84,4 +85,8 @@ func (p MockProvider) SupportsTools() bool {
 // Name returns the provider's name
 func (p MockProvider) Name() string {
 	return "MockProvider"
+}
+
+func (p MockProvider) SetLogger(logger *log.Logger) {
+
 }

@@ -6,23 +6,24 @@ import (
 	"log"
 	"strings"
 
+	"github.com/gelembjuk/cleverchatty/history"
+	"github.com/gelembjuk/cleverchatty/llm"
+	"github.com/gelembjuk/cleverchatty/llm/anthropic"
+	"github.com/gelembjuk/cleverchatty/llm/google"
+	"github.com/gelembjuk/cleverchatty/llm/ollama"
+	"github.com/gelembjuk/cleverchatty/llm/openai"
 	"github.com/gelembjuk/cleverchatty/test"
-	"github.com/mark3labs/mcphost/pkg/history"
-	"github.com/mark3labs/mcphost/pkg/llm"
-	"github.com/mark3labs/mcphost/pkg/llm/anthropic"
-	"github.com/mark3labs/mcphost/pkg/llm/google"
-	"github.com/mark3labs/mcphost/pkg/llm/ollama"
-	"github.com/mark3labs/mcphost/pkg/llm/openai"
 )
 
 type CleverChatty struct {
-	context   context.Context
-	config    CleverChattyConfig
-	logger    *log.Logger
-	provider  llm.Provider
-	mcpHost   *MCPHost
-	messages  []history.HistoryMessage
-	Callbacks uiCallbacks
+	context              context.Context
+	config               CleverChattyConfig
+	logger               *log.Logger
+	provider             llm.Provider
+	mcpHost              *MCPHost
+	messages             []history.HistoryMessage
+	singlePromptMessages []history.HistoryMessage
+	Callbacks            uiCallbacks
 }
 
 func GetCleverChatty(config CleverChattyConfig, ctx context.Context) (*CleverChatty, error) {

@@ -7,9 +7,9 @@ import (
 	"strings"
 	"time"
 
+	"github.com/gelembjuk/cleverchatty/history"
+	"github.com/gelembjuk/cleverchatty/llm"
 	"github.com/mark3labs/mcp-go/mcp"
-	"github.com/mark3labs/mcphost/pkg/history"
-	"github.com/mark3labs/mcphost/pkg/llm"
 )
 
 func (assistant *CleverChatty) pruneMessages() {
@@ -69,28 +69,66 @@ func (assistant *CleverChatty) pruneMessages() {
 	assistant.messages = prunedMessages
 }
 
+func (assistant *CleverChatty) appendMessage(message history.HistoryMessage) {
+	assistant.messages = append(assistant.messages, message)
+	assistant.singlePromptMessages = append(assistant.singlePromptMessages, message)
+}
+
+func (assistant *CleverChatty) injectMemories() {
+	// get memories if there are any
+	// TODO. Add timeouts to context
+	memories, _ := assistant.mcpHost.Recall(context.Background())
+
+	if memories == "" {
+		return // no memories to inject
+	}
+	// if this kind of message is already in the history, replace the contents, else append to the end
+	replaced := false
+	for i, msg := range assistant.messages {
+		if msg.IsMemoryNote() {
+			assistant.messages[i].ReplaceContents(memories)
+			replaced = true
+			break
+		}
+	}
+	if !replaced {
+		assistant.appendMessage(history.NewMemoryNoteMessage(memories))
+	}
+}
+
 // Method implementations for simpleMessage
 func (assistant *CleverChatty) Prompt(prompt string) (string, error) {
+	if prompt == "" {
+		return "", nil
+	}
 
 	assistant.pruneMessages()
+	assistant.singlePromptMessages = make([]history.HistoryMessage, 0)
 
-	// Display the user's prompt if it's not empty (i.e., not a tool response)
-	if prompt != "" {
-		if err := assistant.Callbacks.callStartedPromptProcessing(prompt); err != nil {
-			return "", fmt.Errorf("error in callback: %v", err)
-		}
+	assistant.Callbacks.callStartedPromptProcessing(prompt)
 
-		assistant.messages = append(
-			assistant.messages,
-			history.HistoryMessage{
-				Role: "user",
-				Content: []history.ContentBlock{{
-					Type: "text",
-					Text: prompt,
-				}},
-			},
-		)
+	assistant.injectMemories()
+
+	assistant.appendMessage(history.HistoryMessage{
+		Role: "user",
+		Content: []history.ContentBlock{{
+			Type: "text",
+			Text: prompt,
+		}},
+	})
+
+	response, err := assistant.processPrompt(prompt)
+	if err != nil {
+		return "", err
 	}
+	// time to refresh the memory
+	assistant.mcpHost.Rerember(assistant.singlePromptMessages, context.Background())
+	assistant.singlePromptMessages = make([]history.HistoryMessage, 0)
+
+	return response, nil
+}
+
+func (assistant *CleverChatty) processPrompt(prompt string) (string, error) {
 
 	var message llm.Message
 	var err error
@@ -138,6 +176,7 @@ func (assistant *CleverChatty) Prompt(prompt string) (string, error) {
 		if err != nil {
 			// Check if it's an overloaded error
 			if strings.Contains(err.Error(), "overloaded_error") {
+				// it is specific to Anthropic
 				if retries >= maxRetries {
 					return "", fmt.Errorf(
 						"claude is currently overloaded. please wait a few minutes and try again",
@@ -194,67 +233,26 @@ func (assistant *CleverChatty) Prompt(prompt string) (string, error) {
 				inputTokens, outputTokens, inputTokens+outputTokens)
 		}
 
+		assistant.Callbacks.callToolCalling(toolCall.GetName())
+
 		parts := strings.Split(toolCall.GetName(), "__")
 		if len(parts) != 2 {
-			assistant.logger.Printf(
-				"Error: Invalid tool name format: %s\n",
-				toolCall.GetName(),
-			)
-			continue
+			continue // Invalid tool name format
 		}
 
 		serverName, toolName := parts[0], parts[1]
-		mcpClient, ok := assistant.mcpHost.clients[serverName]
-		if !ok {
-			assistant.logger.Printf("Error: Server not found: %s\n", serverName)
-			continue
-		}
 
-		var toolArgs map[string]interface{}
-		if err := json.Unmarshal(input, &toolArgs); err != nil {
-			assistant.logger.Printf("Error parsing tool arguments: %v\n", err)
-			continue
-		}
-
-		var toolResultPtr *mcp.CallToolResult
-		type result struct {
-			toolResultPtr *mcp.CallToolResult
-			err           error
-		}
-
-		resultCh := make(chan result, 1)
-
-		go func() {
-
-			req := mcp.CallToolRequest{}
-			req.Params.Name = toolName
-			req.Params.Arguments = toolArgs
-
-			toolResultPtr, err := mcpClient.CallTool(
-				context.Background(),
-				req,
-			)
-
-			resultCh <- result{toolResultPtr: toolResultPtr, err: err}
-
-		}()
-
-		assistant.Callbacks.callToolCalling(toolCall.GetName())
-
-		select {
-		case res := <-resultCh:
-			// done!
-			toolResultPtr = res.toolResultPtr
-			err = res.err
-		case <-assistant.context.Done():
-			// context cancelled or timed out
-			err = assistant.context.Err()
-		}
+		toolResultPtr, err := assistant.mcpHost.callTool(
+			serverName,
+			toolName,
+			toolCall.GetArguments(),
+			assistant.context,
+		)
 
 		if err != nil {
 			errMsg := fmt.Sprintf(
 				"Error calling tool %s: %v",
-				toolName,
+				toolCall.GetName(),
 				err,
 			)
 			assistant.Callbacks.callToolCallFailed(toolCall.GetName(), err)
@@ -291,27 +289,30 @@ func (assistant *CleverChatty) Prompt(prompt string) (string, error) {
 			}
 
 			resultBlock.Text = strings.TrimSpace(resultText)
-			assistant.logger.Printf("created tool result block. %s, %s\n",
-				resultBlock,
-				toolCall.GetID())
+
+			if assistant.config.DebugMode {
+				assistant.logger.Printf("created tool result block. %s, %s\n",
+					resultBlock,
+					toolCall.GetID())
+			}
 
 			toolResults = append(toolResults, resultBlock)
 		}
 	}
-
-	assistant.messages = append(assistant.messages, history.HistoryMessage{
+	assistant.appendMessage(history.HistoryMessage{
 		Role:    message.GetRole(),
 		Content: messageContent,
 	})
 
 	if len(toolResults) > 0 {
-		assistant.messages = append(assistant.messages, history.HistoryMessage{
-			Role:    "user", // why user? TODO. To confirm against MCP specs if this shouldbe a user or soething else
+
+		assistant.appendMessage(history.HistoryMessage{
+			Role:    "user",
 			Content: toolResults,
 		})
 
 		// Make another call to get LLM's response to the tool results
-		return assistant.Prompt("")
+		return assistant.processPrompt("")
 	}
 
 	return message.GetContent(), nil

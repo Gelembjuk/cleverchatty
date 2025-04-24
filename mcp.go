@@ -8,17 +8,24 @@ import (
 
 	"strings"
 
+	"github.com/gelembjuk/cleverchatty/history"
+	"github.com/gelembjuk/cleverchatty/llm"
 	"github.com/gelembjuk/cleverchatty/test"
 	mcpclient "github.com/mark3labs/mcp-go/client"
 	"github.com/mark3labs/mcp-go/mcp"
-	"github.com/mark3labs/mcphost/pkg/llm"
+)
+
+const (
+	memoryToolRememberName = "remember"
+	memoryToolRecallName   = "recall"
 )
 
 type MCPHost struct {
-	config  map[string]ServerConfigWrapper
-	logger  *log.Logger
-	clients map[string]mcpclient.MCPClient
-	tools   []llm.Tool
+	config           map[string]ServerConfigWrapper
+	logger           *log.Logger
+	clients          map[string]mcpclient.MCPClient
+	tools            []llm.Tool
+	memoryServerName string
 }
 
 type ServerToolInfo struct {
@@ -195,6 +202,12 @@ func (host *MCPHost) createMCPClients() error {
 		}
 
 		clients[name] = client
+
+		if server.isMemoryServer() {
+			host.memoryServerName = name
+			host.logger.Printf("Memory server connected %s\n", name)
+		}
+
 		host.logger.Printf("Server connected %s\n", name)
 	}
 
@@ -220,6 +233,12 @@ func (host *MCPHost) Close() error {
 func (host *MCPHost) loadMCPTools(ctx context.Context) error {
 	var allTools []llm.Tool
 	for serverName, mcpClient := range host.clients {
+		config, ok := host.config[serverName]
+
+		if !ok {
+			host.logger.Printf("Server %s not found in config\n", serverName)
+			continue
+		}
 		ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
 		toolsResult, err := mcpClient.ListTools(ctx, mcp.ListToolsRequest{})
 		cancel()
@@ -233,16 +252,68 @@ func (host *MCPHost) loadMCPTools(ctx context.Context) error {
 			continue
 		}
 
-		serverTools := host.mcpToolsToAnthropicTools(serverName, toolsResult.Tools)
+		filteredTools := []mcp.Tool{}
+
+		for _, tool := range toolsResult.Tools {
+			if config.isMemoryServer() {
+				// Ignore memory-related tools
+				if tool.Name == memoryToolRememberName ||
+					tool.Name == memoryToolRecallName {
+					continue
+				}
+			}
+			filteredTools = append(filteredTools, tool)
+		}
+
+		serverTools := host.mcpToolsToAnthropicTools(serverName, filteredTools)
 		allTools = append(allTools, serverTools...)
+
 		host.logger.Printf(
 			"Tools loaded from server %s: %d tools\n",
 			serverName,
-			len(toolsResult.Tools),
+			len(filteredTools),
 		)
 	}
 	host.tools = allTools
 	return nil
+}
+
+func (host MCPHost) callTool(serverName string, toolName string, toolArgs map[string]interface{}, ctx context.Context) (*mcp.CallToolResult, error) {
+	mcpClient, ok := host.clients[serverName]
+	if !ok {
+		return nil, fmt.Errorf("server not found: %s", serverName)
+	}
+
+	type result struct {
+		toolResultPtr *mcp.CallToolResult
+		err           error
+	}
+
+	resultCh := make(chan result, 1)
+
+	go func() {
+
+		req := mcp.CallToolRequest{}
+		req.Params.Name = toolName
+		req.Params.Arguments = toolArgs
+
+		toolResultPtr, err := mcpClient.CallTool(
+			context.Background(),
+			req,
+		)
+
+		resultCh <- result{toolResultPtr: toolResultPtr, err: err}
+
+	}()
+
+	select {
+	case res := <-resultCh:
+		// done!
+		return res.toolResultPtr, res.err
+	case <-ctx.Done():
+		// context cancelled or timed out
+		return nil, ctx.Err()
+	}
 }
 
 func (host MCPHost) getServersInfo() []ServerInfo {
@@ -308,4 +379,63 @@ func (host MCPHost) getToolsInfo() []ServerInfo {
 		servers[i].Tools = tools
 	}
 	return servers
+}
+
+// if there is a memory MCP server, then it should be used. Send the messages to it
+func (host MCPHost) Rerember(lastMessages []history.HistoryMessage, ctx context.Context) error {
+	if host.memoryServerName == "" {
+		return nil
+	}
+
+	// call the memory server to remember the messages
+	_, err := host.callTool(
+		host.memoryServerName,
+		memoryToolRememberName,
+		map[string]interface{}{
+			"data": lastMessages,
+		},
+		ctx,
+	)
+	return err
+}
+
+// requests the memory server to recall the messages
+func (host MCPHost) Recall(ctx context.Context) (string, error) {
+	if host.memoryServerName == "" {
+		return "", nil
+	}
+
+	// call the memory server to recall the messages
+	toolResultPtr, err := host.callTool(
+		host.memoryServerName,
+		memoryToolRecallName,
+		map[string]interface{}{},
+		ctx,
+	)
+	if err != nil {
+		host.logger.Printf(
+			"Error recalling messages: %v\n",
+			err,
+		)
+		return "", err
+	}
+	if toolResultPtr == nil {
+		return "", fmt.Errorf("no result from memory server")
+	}
+	if toolResultPtr.Content == nil {
+		return "", fmt.Errorf("no content from memory server")
+	}
+	var resultText string
+	for _, item := range toolResultPtr.Content {
+		if contentMap, ok := item.(mcp.TextContent); ok {
+			resultText += fmt.Sprintf("%v ", contentMap.Text)
+		}
+	}
+	resultText = strings.TrimSpace(resultText)
+
+	if resultText == "none" {
+		return "", nil
+	}
+
+	return strings.TrimSpace(resultText), nil
 }
