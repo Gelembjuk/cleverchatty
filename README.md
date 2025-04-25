@@ -108,6 +108,7 @@ Example of the config:
             "command": "get_location",
             "args": [
                 "--location"
+			]
         }
     },
     "anthropic": {
