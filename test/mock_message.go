@@ -1,7 +1,7 @@
 package test
 
 import (
-	"github.com/mark3labs/mcphost/pkg/llm"
+	"github.com/gelembjuk/cleverchatty/llm"
 )
 
 type MockMessage struct {

@@ -10,15 +10,17 @@ import (
 )
 
 const (
-	thisToolName          = "CleverChatty"
-	thisToolVersion       = "0.1.0"
-	transportStdio        = "stdio"
-	transportSSE          = "sse"
-	transportInternal     = "internal"
-	defaultMessagesWindow = 10
-	initialBackoff        = 1 * time.Second
-	maxBackoff            = 30 * time.Second
-	maxRetries            = 5 // Will reach close to max backoff
+	thisToolName             = "CleverChatty"
+	thisToolVersion          = "0.1.0"
+	transportStdio           = "stdio"
+	transportSSE             = "sse"
+	transportInternal        = "internal"
+	mcpServerInterfaceNone   = "none"
+	mcpServerInterfaceMemory = "memory"
+	defaultMessagesWindow    = 10
+	initialBackoff           = 1 * time.Second
+	maxBackoff               = 30 * time.Second
+	maxRetries               = 5 // Will reach close to max backoff
 )
 
 type OpenAIConfig struct {
@@ -70,7 +72,8 @@ func (s InternalServerConfig) GetType() string {
 }
 
 type ServerConfigWrapper struct {
-	Config ServerConfig
+	Config    ServerConfig
+	Interface string `json:"interface"`
 }
 
 type CleverChattyConfig struct {
@@ -82,6 +85,7 @@ type CleverChattyConfig struct {
 	OpenAI        OpenAIConfig                   `json:"openai"`
 	Google        GoogleConfig                   `json:"google"`
 	MCPServers    map[string]ServerConfigWrapper `json:"mcpServers"`
+	MemoryServer  string                         `json:"memoryServer"`
 }
 
 func CreateStandardConfigFile(configPath string) (*CleverChattyConfig, error) {
@@ -136,12 +140,15 @@ func LoadMCPConfig(configPath string) (*CleverChattyConfig, error) {
 
 func (w *ServerConfigWrapper) UnmarshalJSON(data []byte) error {
 	var typeField struct {
-		Url string `json:"url"`
+		Url       string `json:"url"`
+		Interface string `json:"interface"`
 	}
 
 	if err := json.Unmarshal(data, &typeField); err != nil {
 		return err
 	}
+	w.Interface = typeField.Interface
+
 	if typeField.Url != "" {
 		// If the URL field is present, treat it as an SSE server
 		var sse SSEServerConfig
@@ -162,6 +169,10 @@ func (w *ServerConfigWrapper) UnmarshalJSON(data []byte) error {
 }
 func (w ServerConfigWrapper) MarshalJSON() ([]byte, error) {
 	return json.Marshal(w.Config)
+}
+
+func (w ServerConfigWrapper) isMemoryServer() bool {
+	return w.Interface == mcpServerInterfaceMemory
 }
 
 func initLogger(config *CleverChattyConfig) (*log.Logger, error) {

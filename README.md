@@ -13,9 +13,27 @@
 
 This package is ideal for developers building custom UIs (e.g., CLI, web, mobile) that require AI chat capabilities without duplicating logic across implementations.
 
+## UI for CleverChatty
+
+The package is designed to be used with any UI. However, if you are looking for a simple UI to test the package, you can use [CleverChatty CLI](https://github.com/Gelembjuk/cleverchatty-cli). It is a command-line interface that allows you to interact with the CleverChatty package easily.
+
 ## Models 
 
-The package works with any models supports by Ollama. Also: OpenAI, Anthropic and Google models by APIs.
+The package works with any models supports by Ollama. Also: OpenAI, Anthropic and Google models by APIs. The model is provided in the format: `provider:model`
+
+Supported providers:
+
+- `ollama` - Ollama models
+- `anthropic` - Anthropic models
+- `openai` - OpenAI models
+- `google` - Google models
+
+Examples:
+
+- `ollama:llama2:7b` - Ollama model
+- `anthropic:claude-2` - Anthropic model
+- `openai:gpt-3.5-turbo` - OpenAI model
+- `google:bert` - Google model
 
 ## Example
 
@@ -69,6 +87,88 @@ func main() {
 }
 
 ```
+
+## Config
+
+The package can help to parse the JSON file with the config for the application using it.
+
+Example of the config:
+
+```json
+{
+    "log_file_path": "",
+    "model": "ollama:qwen2.5:3b",
+    "mcpServers": {
+        "weather_server": {
+            "url": "http://weather-service:8000/mcp",
+            "headers": [
+            ]
+        },
+        "get_location_server": {
+            "command": "get_location",
+            "args": [
+                "--location"
+        }
+    },
+    "anthropic": {
+        "apikey": "sk-**************AA",
+        "base_url": "https://api.anthropic.com/v1",
+        "default_model": "claude-2"
+    },
+    "openai": {
+        "apikey": "sk-********0A",
+        "base_url": "https://api.openai.com/v1",
+        "default_model": "gpt-3.5-turbo"
+    },
+    "google": {
+        "apikey": "AI***************z4",
+        "default_model": "google-bert"
+    }
+}
+```
+
+The example above can be transformed to this one
+
+```golang
+package main
+
+import (
+	"context"
+	"fmt"
+	"os"
+
+	"github.com/gelembjuk/cleverchatty"
+)
+
+
+const configFile = "config.json"
+
+func main() {
+	config, err := cleverchatty.LoadMCPConfig(configFile)
+
+	cleverChattyObject, err := cleverchatty.GetCleverChatty(config, context.Background())
+
+	if err != nil {
+		fmt.Errorf("Error creating assistant: %v", err)
+		os.Exit(1)
+	}
+	defer func() {
+		cleverChattyObject.Finish()
+	}()
+
+	response, err := cleverChattyObject.Prompt("What is the weather like outside today?")
+
+	if err != nil {
+		fmt.Errorf("Error getting response: %v", err)
+		os.Exit(1)
+	}
+	fmt.Println("Response:", response)
+
+}
+
+```
+
+The only required config is `model`. The rest of the config is optional. 
 
 ## Credits
 
