@@ -298,7 +298,7 @@ func (host MCPHost) callTool(serverName string, toolName string, toolArgs map[st
 		req.Params.Arguments = toolArgs
 
 		toolResultPtr, err := mcpClient.CallTool(
-			context.Background(),
+			ctx,
 			req,
 		)
 
@@ -387,20 +387,31 @@ func (host MCPHost) Remember(role string, content history.ContentBlock, ctx cont
 	if host.memoryServerName == "" {
 		return
 	}
-
+	if content.Type != "text" {
+		return
+	}
+	host.logger.Printf(
+		"Remembering message: %s %s\n",
+		role,
+		content.Text,
+	)
 	// call the memory server to remember the messages
-	go func() {
-		// TODO: is it safe to send in a goroutine? maybe better to have some kind of mutex?
-		host.callTool(
-			host.memoryServerName,
-			memoryToolRememberName,
-			map[string]interface{}{
-				"role":    role,
-				"content": content,
-			},
-			ctx,
+	_, err := host.callTool(
+		host.memoryServerName,
+		memoryToolRememberName,
+		map[string]interface{}{
+			"role":     role,
+			"contents": content.Text,
+		},
+		ctx,
+	)
+	if err != nil {
+		host.logger.Printf(
+			"Error remembering message: %v\n",
+			err,
 		)
-	}()
+		return
+	}
 }
 
 // requests the memory server to recall the messages

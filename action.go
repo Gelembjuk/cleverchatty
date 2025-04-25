@@ -113,12 +113,13 @@ func (assistant *CleverChatty) Prompt(prompt string) (string, error) {
 
 	assistant.messages = append(assistant.messages, history.NewUserPromptMessage(prompt))
 
+	// time to refresh the memory
+	assistant.addToMemory("user", prompt)
+
 	response, err := assistant.processPrompt(prompt)
 	if err != nil {
 		return "", err
 	}
-	// time to refresh the memory
-	assistant.addToMemory("user", prompt)
 
 	return response, nil
 }
