@@ -13,6 +13,7 @@ const (
 	thisToolName             = "CleverChatty"
 	thisToolVersion          = "0.1.0"
 	transportStdio           = "stdio"
+	transportHTTPStreaming   = "http_streaming"
 	transportSSE             = "sse"
 	transportInternal        = "internal"
 	mcpServerInterfaceNone   = "none"
@@ -52,6 +53,15 @@ type STDIOServerConfig struct {
 
 func (s STDIOServerConfig) GetType() string {
 	return transportStdio
+}
+
+type HTTPStreamingServerConfig struct {
+	Url     string   `json:"url"`
+	Headers []string `json:"headers,omitempty"`
+}
+
+func (s HTTPStreamingServerConfig) GetType() string {
+	return transportHTTPStreaming
 }
 
 type SSEServerConfig struct {
@@ -115,7 +125,7 @@ func CreateStandardConfigFile(configPath string) (*CleverChattyConfig, error) {
 	return &defaultConfig, nil
 }
 
-func LoadMCPConfig(configPath string) (*CleverChattyConfig, error) {
+func LoadConfig(configPath string) (*CleverChattyConfig, error) {
 	// Read existing config
 	configData, err := os.ReadFile(configPath)
 	if err != nil {
@@ -141,6 +151,7 @@ func LoadMCPConfig(configPath string) (*CleverChattyConfig, error) {
 func (w *ServerConfigWrapper) UnmarshalJSON(data []byte) error {
 	var typeField struct {
 		Url       string `json:"url"`
+		Transport string `json:"transport"`
 		Interface string `json:"interface"`
 	}
 
@@ -150,12 +161,21 @@ func (w *ServerConfigWrapper) UnmarshalJSON(data []byte) error {
 	w.Interface = typeField.Interface
 
 	if typeField.Url != "" {
-		// If the URL field is present, treat it as an SSE server
-		var sse SSEServerConfig
-		if err := json.Unmarshal(data, &sse); err != nil {
-			return err
+		if typeField.Transport == transportSSE {
+			// If the URL field is present, treat it as an SSE server
+			var sse SSEServerConfig
+			if err := json.Unmarshal(data, &sse); err != nil {
+				return err
+			}
+			w.Config = sse
+		} else {
+			// Otherwise, treat it as an HTTP streaming server
+			var httpStreaming HTTPStreamingServerConfig
+			if err := json.Unmarshal(data, &httpStreaming); err != nil {
+				return err
+			}
+			w.Config = httpStreaming
 		}
-		w.Config = sse
 	} else {
 		// Otherwise, treat it as a STDIOServerConfig
 		var stdio STDIOServerConfig

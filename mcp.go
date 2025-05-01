@@ -12,6 +12,7 @@ import (
 	"github.com/gelembjuk/cleverchatty/llm"
 	"github.com/gelembjuk/cleverchatty/test"
 	mcpclient "github.com/mark3labs/mcp-go/client"
+	"github.com/mark3labs/mcp-go/client/transport"
 	"github.com/mark3labs/mcp-go/mcp"
 )
 
@@ -122,7 +123,7 @@ func (host *MCPHost) createMCPClients() error {
 		if server.Config.GetType() == transportSSE {
 			sseConfig := server.Config.(SSEServerConfig)
 
-			options := []mcpclient.ClientOption{}
+			options := []transport.ClientOption{}
 
 			if sseConfig.Headers != nil {
 				// Parse headers from the config
@@ -142,9 +143,29 @@ func (host *MCPHost) createMCPClients() error {
 				sseConfig.Url,
 				options...,
 			)
-			if err == nil {
-				err = client.(*mcpclient.SSEMCPClient).Start(context.Background())
+		} else if server.Config.GetType() == transportHTTPStreaming {
+			httpConfig := server.Config.(HTTPStreamingServerConfig)
+
+			options := []transport.StreamableHTTPCOption{}
+
+			if httpConfig.Headers != nil {
+				// Parse headers from the config
+				headers := make(map[string]string)
+				for _, header := range httpConfig.Headers {
+					parts := strings.SplitN(header, ":", 2)
+					if len(parts) == 2 {
+						key := strings.TrimSpace(parts[0])
+						value := strings.TrimSpace(parts[1])
+						headers[key] = value
+					}
+				}
+				options = append(options, transport.WithHTTPHeaders(headers))
 			}
+
+			client, err = mcpclient.NewStreamableHttpClient(
+				httpConfig.Url,
+				options...,
+			)
 		} else if server.Config.GetType() == transportInternal {
 			internalConfig := server.Config.(InternalServerConfig)
 
@@ -164,6 +185,9 @@ func (host *MCPHost) createMCPClients() error {
 				stdioConfig.Command,
 				env,
 				stdioConfig.Args...)
+		}
+		if err == nil {
+			err = client.(*mcpclient.Client).Start(context.Background())
 		}
 		if err != nil {
 			for _, c := range clients {
