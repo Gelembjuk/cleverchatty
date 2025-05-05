@@ -99,7 +99,7 @@ func (assistant *CleverChatty) injectMemories() {
 	}
 }
 
-// Method implementations for simpleMessage
+// Method implementations for simpleMessage. This is the prompts from a user
 func (assistant *CleverChatty) Prompt(prompt string) (string, error) {
 	if prompt == "" {
 		return "", nil
@@ -116,7 +116,7 @@ func (assistant *CleverChatty) Prompt(prompt string) (string, error) {
 	// time to refresh the memory
 	assistant.addToMemory("user", prompt)
 
-	response, err := assistant.processPrompt(prompt)
+	response, err := assistant.processPrompt(prompt, "user")
 	if err != nil {
 		return "", err
 	}
@@ -124,23 +124,69 @@ func (assistant *CleverChatty) Prompt(prompt string) (string, error) {
 	return response, nil
 }
 
-func (assistant *CleverChatty) processPrompt(prompt string) (string, error) {
+// New notification come from one of the servers. This must trigger new request to LLM
+func (assistant *CleverChatty) serverNotification(serverName string, notification mcp.JSONRPCNotification) error {
+	toolName, resultContent, err := assistant.mcpHost.getContentOnNotification(
+		serverName,
+		notification,
+		assistant.context,
+		func(tool string) {
+			assistant.Callbacks.callToolCalling(tool)
+		})
+
+	if err != nil {
+		fmt.Println("Error getting content on notification:", err)
+		return fmt.Errorf(
+			"Error getting content on notification %s: %v",
+			notification.Method,
+			err,
+		)
+	}
+	assistant.logger.Printf("Notification received: %s\n", notification.Method)
+	assistant.logger.Printf("Tool called: %s\n", toolName)
+	assistant.logger.Printf("Result content: %v\n", resultContent)
+
+	assistant.messages = append(assistant.messages, history.HistoryMessage{
+		Role: "system",
+		Content: []history.ContentBlock{
+			{
+				Type:    "text",
+				Content: mcp.TextContent{Text: fmt.Sprintf(commentOnNotificationReceived, serverName, toolName)},
+			},
+		},
+	})
+
+	assistant.messages = append(assistant.messages, history.NewUserPromptMessage(resultContent))
+
+	// Make another call to get LLM's response to the tool results
+	_, err = assistant.processPrompt(resultContent, "notification")
+
+	return err
+}
+
+// Process the prompt and return the response
+// kind can be "user" or "notification" - who inited the request
+func (assistant *CleverChatty) processPrompt(prompt string, kind string) (string, error) {
 
 	var message llm.Message
 	var err error
 	backoff := initialBackoff
 	retries := 0
+	assistant.logger.Printf("Processing prompt: %s, %s\n", prompt, kind)
 
 	// Convert MessageParam to llm.Message for provider
 	// Messages already implement llm.Message interface
 	llmMessages := make([]llm.Message, len(assistant.messages))
-
+	assistant.logger.Println("Messages:")
 	for i := range assistant.messages {
+		assistant.logger.Printf("Message %d: %s\n", i, assistant.messages[i])
 		llmMessages[i] = &(assistant.messages)[i]
 	}
 
 	for {
-		assistant.Callbacks.callStartedThinking()
+		if kind == "user" {
+			assistant.Callbacks.callStartedThinking()
+		}
 
 		type result struct {
 			message llm.Message
@@ -201,7 +247,12 @@ func (assistant *CleverChatty) processPrompt(prompt string) (string, error) {
 
 	// Add text content
 	if message.GetContent() != "" {
-		assistant.Callbacks.callResponseReceived(message.GetContent())
+		assistant.logger.Printf("Message content: %s\n", message.GetContent())
+		if kind == "user" {
+			assistant.Callbacks.callResponseReceived(message.GetContent())
+		} else {
+			assistant.Callbacks.callNotificationProcessed(message.GetContent())
+		}
 
 		messageContent = append(messageContent, history.ContentBlock{
 			Type: "text",
@@ -209,11 +260,13 @@ func (assistant *CleverChatty) processPrompt(prompt string) (string, error) {
 		})
 
 		assistant.addToMemory("assistant", message.GetContent())
+	} else {
+		assistant.logger.Printf("Message content is empty\n")
 	}
 
 	// Handle tool calls
 	for _, toolCall := range message.GetToolCalls() {
-
+		assistant.logger.Printf("Tool call: %s, %v\n", toolCall.GetName(), toolCall.GetArguments())
 		input, _ := json.Marshal(toolCall.GetArguments())
 		messageContent = append(messageContent, history.ContentBlock{
 			Type:  "tool_use",
@@ -229,7 +282,9 @@ func (assistant *CleverChatty) processPrompt(prompt string) (string, error) {
 				inputTokens, outputTokens, inputTokens+outputTokens)
 		}
 
-		assistant.Callbacks.callToolCalling(toolCall.GetName())
+		if kind == "user" {
+			assistant.Callbacks.callToolCalling(toolCall.GetName())
+		}
 
 		parts := strings.Split(toolCall.GetName(), "__")
 		if len(parts) != 2 {
@@ -251,7 +306,9 @@ func (assistant *CleverChatty) processPrompt(prompt string) (string, error) {
 				toolCall.GetName(),
 				err,
 			)
-			assistant.Callbacks.callToolCallFailed(toolCall.GetName(), err)
+			if kind == "user" {
+				assistant.Callbacks.callToolCallFailed(toolCall.GetName(), err)
+			}
 
 			// Add error message as tool result
 			toolResults = append(toolResults, history.ContentBlock{
@@ -266,7 +323,7 @@ func (assistant *CleverChatty) processPrompt(prompt string) (string, error) {
 		}
 
 		toolResult := *toolResultPtr
-
+		assistant.logger.Printf("Tool ID: %s\n", toolCall.GetID())
 		if toolResult.Content != nil {
 			// Create the tool result block
 			resultBlock := history.ContentBlock{
@@ -302,12 +359,12 @@ func (assistant *CleverChatty) processPrompt(prompt string) (string, error) {
 
 	if len(toolResults) > 0 {
 		assistant.messages = append(assistant.messages, history.HistoryMessage{
-			Role:    "user",
+			Role:    "tool",
 			Content: toolResults,
 		})
 
 		// Make another call to get LLM's response to the tool results
-		return assistant.processPrompt("")
+		return assistant.processPrompt("", kind)
 	}
 
 	return message.GetContent(), nil

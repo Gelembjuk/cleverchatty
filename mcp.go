@@ -12,6 +12,7 @@ import (
 	"github.com/gelembjuk/cleverchatty/llm"
 	"github.com/gelembjuk/cleverchatty/test"
 	mcpclient "github.com/mark3labs/mcp-go/client"
+	"github.com/mark3labs/mcp-go/client/transport"
 	"github.com/mark3labs/mcp-go/mcp"
 )
 
@@ -111,18 +112,34 @@ func (host MCPHost) mcpToolsToAnthropicTools(
 	return anthropicTools
 }
 
+// Set notifications callback for all servers
+func (host MCPHost) SetNotificationCallback(
+	callback func(server string, notification mcp.JSONRPCNotification),
+) {
+	for serverName, client := range host.clients {
+		client.OnNotification(func(notification mcp.JSONRPCNotification) {
+			callback(serverName, notification)
+		})
+	}
+}
+
 // Create MCP servers instances
 func (host *MCPHost) createMCPClients() error {
 	clients := make(map[string]mcpclient.MCPClient)
 
 	for name, server := range host.config {
+
+		if server.Disabled {
+			continue
+		}
+
 		var client mcpclient.MCPClient
 		var err error
 
 		if server.Config.GetType() == transportSSE {
 			sseConfig := server.Config.(SSEServerConfig)
 
-			options := []mcpclient.ClientOption{}
+			options := []transport.ClientOption{}
 
 			if sseConfig.Headers != nil {
 				// Parse headers from the config
@@ -135,16 +152,13 @@ func (host *MCPHost) createMCPClients() error {
 						headers[key] = value
 					}
 				}
-				options = append(options, mcpclient.WithHeaders(headers))
+				options = append(options, transport.WithHeaders(headers))
 			}
 
 			client, err = mcpclient.NewSSEMCPClient(
 				sseConfig.Url,
 				options...,
 			)
-			if err == nil {
-				err = client.(*mcpclient.SSEMCPClient).Start(context.Background())
-			}
 		} else if server.Config.GetType() == transportInternal {
 			internalConfig := server.Config.(InternalServerConfig)
 
@@ -164,6 +178,9 @@ func (host *MCPHost) createMCPClients() error {
 				stdioConfig.Command,
 				env,
 				stdioConfig.Args...)
+		}
+		if err == nil {
+			err = client.(*mcpclient.Client).Start(context.Background())
 		}
 		if err != nil {
 			for _, c := range clients {
@@ -297,11 +314,20 @@ func (host MCPHost) callTool(serverName string, toolName string, toolArgs map[st
 		req.Params.Name = toolName
 		req.Params.Arguments = toolArgs
 
+		host.logger.Printf(
+			"Tool %s called on server %s. Waiting response\n",
+			toolName,
+			serverName,
+		)
 		toolResultPtr, err := mcpClient.CallTool(
 			ctx,
 			req,
 		)
-
+		host.logger.Printf(
+			"Response received for tool %s on server %s\n",
+			toolName,
+			serverName,
+		)
 		resultCh <- result{toolResultPtr: toolResultPtr, err: err}
 
 	}()
@@ -453,4 +479,105 @@ func (host MCPHost) Recall(ctx context.Context) (string, error) {
 	}
 
 	return strings.TrimSpace(resultText), nil
+}
+
+func (host MCPHost) getContentOnNotification(
+	serverName string,
+	notification mcp.JSONRPCNotification,
+	ctx context.Context,
+	requestStartCallback func(string),
+) (toolName string, resultContent string, err error) {
+
+	methodName := notification.Method
+	// if the method is not like tool/something then return
+	if !strings.HasPrefix(methodName, "tool/") {
+		return
+	}
+	toolName = strings.TrimPrefix(methodName, "tool/")
+	params := notification.Params.AdditionalFields
+
+	if content, ok := params["_content"]; ok {
+		// if there is content then we just use it as a tool result
+		contentMap, ok := content.(map[string]interface{})
+		if !ok {
+			err = fmt.Errorf(
+				"Error converting content to map[string]interface{}: %v",
+				content,
+			)
+			return
+		}
+		contentType, ok := contentMap["type"].(string)
+		if !ok {
+			err = fmt.Errorf(
+				"Error converting content type to string: %v",
+				contentMap["type"],
+			)
+			return
+		}
+		if contentType != "text" {
+			err = fmt.Errorf(
+				"Error: content type is not text: %v",
+				contentType,
+			)
+			return
+		}
+		text, ok := contentMap["text"].(string)
+		if !ok {
+			err = fmt.Errorf(
+				"Error converting content text to string: %v",
+				contentMap["text"],
+			)
+			return
+		}
+
+		resultContent = text
+
+		return
+	}
+	// if there is no content then we call the tool using the provided parameters.
+	// we presume the method contains the tool name
+
+	requestStartCallback(serverName + "__" + toolName)
+
+	var toolResultPtr *mcp.CallToolResult
+
+	toolResultPtr, err = host.callTool(
+		serverName,
+		toolName,
+		params,
+		ctx,
+	)
+
+	if err != nil {
+		err = fmt.Errorf(
+			"Error calling tool after notification received %s: %v",
+			toolName,
+			err,
+		)
+		return
+	}
+
+	toolResult := *toolResultPtr
+
+	if toolResult.Content == nil {
+		// no error but no content
+		return
+	}
+
+	if len(toolResult.Content) == 0 {
+		// no error but no content
+		return
+	}
+	// Extract text content
+	var resultText string
+	// Handle array content directly since we know it's []interface{}
+	for _, item := range toolResult.Content {
+		if contentMap, ok := item.(mcp.TextContent); ok {
+			resultText += fmt.Sprintf("%v ", contentMap.Text)
+		}
+	}
+
+	resultContent = strings.TrimSpace(resultText)
+
+	return
 }

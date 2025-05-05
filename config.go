@@ -23,6 +23,10 @@ const (
 	maxRetries               = 5 // Will reach close to max backoff
 )
 
+const (
+	commentOnNotificationReceived = "Notification received from server: %s. The tool %s has been called. The next message is the content of the notification."
+)
+
 type OpenAIConfig struct {
 	APIKey       string `json:"apikey"`
 	BaseURL      string `json:"base_url"`
@@ -74,6 +78,8 @@ func (s InternalServerConfig) GetType() string {
 type ServerConfigWrapper struct {
 	Config    ServerConfig
 	Interface string `json:"interface"`
+	Disabled  bool   `json:"disabled"`
+	Required  bool   `json:"required"`
 }
 
 type CleverChattyConfig struct {
@@ -142,12 +148,16 @@ func (w *ServerConfigWrapper) UnmarshalJSON(data []byte) error {
 	var typeField struct {
 		Url       string `json:"url"`
 		Interface string `json:"interface"`
+		Disabled  bool   `json:"disabled"`
+		Required  bool   `json:"required"`
 	}
 
 	if err := json.Unmarshal(data, &typeField); err != nil {
 		return err
 	}
 	w.Interface = typeField.Interface
+	w.Disabled = typeField.Disabled
+	w.Required = typeField.Required
 
 	if typeField.Url != "" {
 		// If the URL field is present, treat it as an SSE server

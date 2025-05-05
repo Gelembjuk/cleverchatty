@@ -7,6 +7,8 @@ type uiCallbacks struct {
 	startedThinking func() error
 	// Final response reveived after all equests to LLM and Tools
 	responseReceived func(response string) error
+	// Notification received on background and assistant generated the response
+	notificationProcessed func(response string) error
 	// Tool is called
 	toolCalling func(tool string) error
 	// Tool call failed. After this the empty response is reported
@@ -49,6 +51,19 @@ func (c *uiCallbacks) SetResponseReceived(f func(response string) error) {
 func (c *uiCallbacks) callResponseReceived(response string) error {
 	if c.responseReceived != nil {
 		return c.responseReceived(response)
+	}
+	return nil
+}
+
+// SetNotificationProcesses sets the callback function to be called when a notification is received
+func (c *uiCallbacks) SetNotificationProcessed(f func(response string) error) {
+	c.notificationProcessed = f
+}
+
+// call notificationProcesses if it is set
+func (c *uiCallbacks) callNotificationProcessed(response string) error {
+	if c.notificationProcessed != nil {
+		return c.notificationProcessed(response)
 	}
 	return nil
 }

@@ -62,7 +62,7 @@ func GetCleverChatty(config CleverChattyConfig, ctx context.Context) (*CleverCha
 	return assistant, nil
 }
 
-func (assistant *CleverChatty) WithLogger(logger *log.Logger) {
+func (assistant *CleverChatty) SetLogger(logger *log.Logger) {
 	assistant.logger = logger
 }
 
