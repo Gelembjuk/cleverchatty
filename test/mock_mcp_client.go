@@ -103,12 +103,17 @@ func (m *MockMCPClient) CallTool(
 	ctx context.Context,
 	request mcp.CallToolRequest,
 ) (*mcp.CallToolResult, error) {
-	if request.Params.Arguments["argument"].(string) == "return_error_response" {
+	args, ok := request.Params.Arguments.(map[string]interface{})
+	if !ok {
+		return nil, errors.New("invalid arguments type")
+	}
+
+	if argStr, ok := args["argument"].(string); ok && argStr == "return_error_response" {
 		return nil, errors.New("FAKE_ERROR_RESPONSE")
 	}
 
 	// Simulate a tool call
-	if request.Params.Arguments["argument"].(string) == "return_empty_text" {
+	if argStr, ok := args["argument"].(string); ok && argStr == "return_empty_text" {
 		return &mcp.CallToolResult{
 			Result: mcp.Result{
 				Meta: map[string]interface{}{},
@@ -121,6 +126,7 @@ func (m *MockMCPClient) CallTool(
 			},
 		}, nil
 	}
+	argStr, _ := args["argument"].(string)
 	return &mcp.CallToolResult{
 		Result: mcp.Result{
 			Meta: map[string]interface{}{},
@@ -128,7 +134,7 @@ func (m *MockMCPClient) CallTool(
 		Content: []mcp.Content{
 			mcp.TextContent{
 				Type: "text",
-				Text: "FAKE_TOOL_RESPONSE:" + request.Params.Arguments["argument"].(string),
+				Text: "FAKE_TOOL_RESPONSE:" + argStr,
 			},
 		},
 	}, nil

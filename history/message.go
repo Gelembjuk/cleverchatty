@@ -13,7 +13,9 @@ const (
 	messageRoleAssistant       = "assistant"
 	messageRoleSystem          = "system"
 	messageSubroleMemory       = "memory"
+	messageSubroleRAGContext   = "rag_context"
 	messageSubrolePrompt       = "prompt"
+	messageSubroleInstruction  = "instruction"
 	messageSubroleToolResponse = "tool_response"
 )
 
@@ -37,6 +39,19 @@ func NewMemoryNoteMessage(content string) HistoryMessage {
 	}
 }
 
+func NewRAGContextMessage(content string) HistoryMessage {
+	return HistoryMessage{
+		Role:    messageRoleUser,
+		SubRole: messageSubroleRAGContext,
+		Content: []ContentBlock{
+			{
+				Type: "text",
+				Text: content,
+			},
+		},
+	}
+}
+
 func NewUserPromptMessage(prompt string) HistoryMessage {
 	return HistoryMessage{
 		Role:    messageRoleUser,
@@ -50,6 +65,19 @@ func NewUserPromptMessage(prompt string) HistoryMessage {
 	}
 }
 
+func NewSystemInstructionMessage(instruction string) HistoryMessage {
+	return HistoryMessage{
+		Role:    messageRoleSystem,
+		SubRole: messageSubroleInstruction,
+		Content: []ContentBlock{
+			{
+				Type: "text",
+				Text: instruction,
+			},
+		},
+	}
+}
+
 func (m *HistoryMessage) GetRole() string {
 	return m.Role
 }
@@ -58,8 +86,20 @@ func (m HistoryMessage) GetSubRole() string {
 	return m.SubRole
 }
 
+func (m HistoryMessage) IsAssistantResponse() bool {
+	return m.Role == messageRoleAssistant
+}
+
 func (m HistoryMessage) IsMemoryNote() bool {
 	return m.SubRole == messageSubroleMemory && m.Role == messageRoleSystem
+}
+
+func (m HistoryMessage) IsRAGContext() bool {
+	return m.SubRole == messageSubroleRAGContext && m.Role == messageRoleUser
+}
+
+func (m HistoryMessage) IsSystemInstruction() bool {
+	return m.SubRole == messageSubroleInstruction && m.Role == messageRoleSystem
 }
 
 // the first block should be the text content

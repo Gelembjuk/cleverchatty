@@ -51,8 +51,8 @@ func (assistant *CleverChatty) pruneMessages() {
 			}
 		}
 		// Only include messages that have content or are not assistant messages
-		if (len(prunedBlocks) > 0 && msg.Role == "assistant") ||
-			msg.Role != "assistant" {
+		if (len(prunedBlocks) > 0 && msg.IsAssistantResponse()) ||
+			!msg.IsAssistantResponse() {
 			hasTextBlock := false
 			for _, block := range msg.Content {
 				if block.Type == "text" {
@@ -85,17 +85,40 @@ func (assistant *CleverChatty) injectMemories() {
 	if memories == "" {
 		return // no memories to inject
 	}
-	// if this kind of message is already in the history, replace the contents, else append to the end
-	replaced := false
-	for i, msg := range assistant.messages {
-		if msg.IsMemoryNote() {
-			assistant.messages[i].ReplaceContents(memories)
-			replaced = true
-			break
+	// if this kind of message is already in the history, remove it to add fresh one
+	// from the array assistant.messages remove any records where msg.IsMemoryNote()
+	var filteredMessages []history.HistoryMessage
+	for _, msg := range assistant.messages {
+		if !msg.IsMemoryNote() {
+			filteredMessages = append(filteredMessages, msg)
 		}
 	}
-	if !replaced {
-		assistant.messages = append(assistant.messages, history.NewMemoryNoteMessage(memories))
+	assistant.messages = filteredMessages
+
+	assistant.messages = append(assistant.messages, history.NewMemoryNoteMessage(memories))
+}
+
+func (assistant *CleverChatty) injectRAGContext(prompt string) {
+	// get RAG context if there are any
+	// TODO. Add timeouts to context
+	ragDocuments, err := assistant.mcpHost.GetRAGContext(context.Background(), prompt)
+
+	if err != nil {
+		assistant.logger.Printf("Error getting RAG context: %v\n", err)
+		return
+	}
+
+	if len(ragDocuments) == 0 {
+		return // no RAG context to inject
+	}
+	prefix := assistant.config.RAGConfig.ContextPrefix
+	if prefix == "" {
+		prefix = "Context:"
+	}
+	// we do not remove the old RAG context, we just append the new one. should we remove the old one?
+	// previous context injections will be removed as a part of common strategy
+	for _, ragContext := range ragDocuments {
+		assistant.messages = append(assistant.messages, history.NewRAGContextMessage(prefix+ragContext))
 	}
 }
 
@@ -105,11 +128,19 @@ func (assistant *CleverChatty) Prompt(prompt string) (string, error) {
 		return "", nil
 	}
 
+	// append system instruction to the history
+	if assistant.config.SystemInstruction != "" && len(assistant.messages) == 0 {
+		assistant.messages = append(assistant.messages, history.NewSystemInstructionMessage(assistant.config.SystemInstruction))
+	}
+
 	assistant.pruneMessages()
 
 	assistant.Callbacks.callStartedPromptProcessing(prompt)
 
+	// if there are memories, inject them into the history
 	assistant.injectMemories()
+	// if there is RAG server configured, do request to it and inject in messages
+	assistant.injectRAGContext(prompt)
 
 	assistant.messages = append(assistant.messages, history.NewUserPromptMessage(prompt))
 
