@@ -17,10 +17,15 @@ const (
 	transportInternal        = "internal"
 	mcpServerInterfaceNone   = "none"
 	mcpServerInterfaceMemory = "memory"
+	mcpServerInterfaceRAG    = "rag"
 	defaultMessagesWindow    = 10
 	initialBackoff           = 1 * time.Second
 	maxBackoff               = 30 * time.Second
 	maxRetries               = 5 // Will reach close to max backoff
+)
+
+const (
+	commentOnNotificationReceived = "Notification received from server: %s. The tool %s has been called. The next message is the content of the notification."
 )
 
 type OpenAIConfig struct {
@@ -74,18 +79,25 @@ func (s InternalServerConfig) GetType() string {
 type ServerConfigWrapper struct {
 	Config    ServerConfig
 	Interface string `json:"interface"`
+	Disabled  bool   `json:"disabled"`
+	Required  bool   `json:"required"`
+}
+
+type RAGConfig struct {
+	ContextPrefix string `json:"context_prefix"`
 }
 
 type CleverChattyConfig struct {
-	LogFilePath   string                         `json:"log_file_path"`
-	DebugMode     bool                           `json:"debug_mode"`
-	MessageWindow int                            `json:"message_window"`
-	Model         string                         `json:"model"`
-	Anthropic     AnthropicConfig                `json:"anthropic"`
-	OpenAI        OpenAIConfig                   `json:"openai"`
-	Google        GoogleConfig                   `json:"google"`
-	MCPServers    map[string]ServerConfigWrapper `json:"mcpServers"`
-	MemoryServer  string                         `json:"memoryServer"`
+	LogFilePath       string                         `json:"log_file_path"`
+	DebugMode         bool                           `json:"debug_mode"`
+	MessageWindow     int                            `json:"message_window"`
+	Model             string                         `json:"model"`
+	SystemInstruction string                         `json:"system_instruction"`
+	Anthropic         AnthropicConfig                `json:"anthropic"`
+	OpenAI            OpenAIConfig                   `json:"openai"`
+	Google            GoogleConfig                   `json:"google"`
+	MCPServers        map[string]ServerConfigWrapper `json:"mcpServers"`
+	RAGConfig         RAGConfig                      `json:"rag_settings"`
 }
 
 func CreateStandardConfigFile(configPath string) (*CleverChattyConfig, error) {
@@ -96,6 +108,7 @@ func CreateStandardConfigFile(configPath string) (*CleverChattyConfig, error) {
 		MessageWindow: 10,
 		Model:         "",
 		MCPServers:    make(map[string]ServerConfigWrapper),
+		RAGConfig:     RAGConfig{ContextPrefix: "Context:"},
 	}
 
 	configData, err := json.MarshalIndent(defaultConfig, "", "  ")
@@ -115,7 +128,7 @@ func CreateStandardConfigFile(configPath string) (*CleverChattyConfig, error) {
 	return &defaultConfig, nil
 }
 
-func LoadMCPConfig(configPath string) (*CleverChattyConfig, error) {
+func LoadConfig(configPath string) (*CleverChattyConfig, error) {
 	// Read existing config
 	configData, err := os.ReadFile(configPath)
 	if err != nil {
@@ -142,12 +155,16 @@ func (w *ServerConfigWrapper) UnmarshalJSON(data []byte) error {
 	var typeField struct {
 		Url       string `json:"url"`
 		Interface string `json:"interface"`
+		Disabled  bool   `json:"disabled"`
+		Required  bool   `json:"required"`
 	}
 
 	if err := json.Unmarshal(data, &typeField); err != nil {
 		return err
 	}
 	w.Interface = typeField.Interface
+	w.Disabled = typeField.Disabled
+	w.Required = typeField.Required
 
 	if typeField.Url != "" {
 		// If the URL field is present, treat it as an SSE server
@@ -173,6 +190,10 @@ func (w ServerConfigWrapper) MarshalJSON() ([]byte, error) {
 
 func (w ServerConfigWrapper) isMemoryServer() bool {
 	return w.Interface == mcpServerInterfaceMemory
+}
+
+func (w ServerConfigWrapper) isRAGServer() bool {
+	return w.Interface == mcpServerInterfaceRAG
 }
 
 func initLogger(config *CleverChattyConfig) (*log.Logger, error) {

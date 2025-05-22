@@ -10,14 +10,15 @@ import (
 
 	"github.com/gelembjuk/cleverchatty/history"
 	"github.com/gelembjuk/cleverchatty/llm"
-	"github.com/gelembjuk/cleverchatty/test"
 	mcpclient "github.com/mark3labs/mcp-go/client"
+	"github.com/mark3labs/mcp-go/client/transport"
 	"github.com/mark3labs/mcp-go/mcp"
 )
 
 const (
 	memoryToolRememberName = "remember"
 	memoryToolRecallName   = "recall"
+	ragToolName            = "knowledge_search"
 )
 
 type MCPHost struct {
@@ -26,6 +27,7 @@ type MCPHost struct {
 	clients          map[string]mcpclient.MCPClient
 	tools            []llm.Tool
 	memoryServerName string
+	ragServerName    string
 }
 
 type ServerToolInfo struct {
@@ -116,13 +118,18 @@ func (host *MCPHost) createMCPClients() error {
 	clients := make(map[string]mcpclient.MCPClient)
 
 	for name, server := range host.config {
+
+		if server.Disabled {
+			continue
+		}
+
 		var client mcpclient.MCPClient
 		var err error
 
 		if server.Config.GetType() == transportSSE {
 			sseConfig := server.Config.(SSEServerConfig)
 
-			options := []mcpclient.ClientOption{}
+			options := []transport.ClientOption{}
 
 			if sseConfig.Headers != nil {
 				// Parse headers from the config
@@ -135,25 +142,17 @@ func (host *MCPHost) createMCPClients() error {
 						headers[key] = value
 					}
 				}
-				options = append(options, mcpclient.WithHeaders(headers))
+				options = append(options, transport.WithHeaders(headers))
 			}
 
 			client, err = mcpclient.NewSSEMCPClient(
 				sseConfig.Url,
 				options...,
 			)
-			if err == nil {
-				err = client.(*mcpclient.SSEMCPClient).Start(context.Background())
-			}
 		} else if server.Config.GetType() == transportInternal {
 			internalConfig := server.Config.(InternalServerConfig)
 
-			if internalConfig.Kind == "mock" {
-				client = &test.MockMCPClient{}
-				err = nil
-			} else {
-				err = fmt.Errorf("unknown internal server kind: %s", internalConfig.Kind)
-			}
+			err = fmt.Errorf("unknown internal server kind: %s", internalConfig.Kind)
 		} else {
 			stdioConfig := server.Config.(STDIOServerConfig)
 			var env []string
@@ -164,6 +163,9 @@ func (host *MCPHost) createMCPClients() error {
 				stdioConfig.Command,
 				env,
 				stdioConfig.Args...)
+		}
+		if err == nil {
+			err = client.(*mcpclient.Client).Start(context.Background())
 		}
 		if err != nil {
 			for _, c := range clients {
@@ -206,6 +208,10 @@ func (host *MCPHost) createMCPClients() error {
 		if server.isMemoryServer() {
 			host.memoryServerName = name
 			host.logger.Printf("Memory server connected %s\n", name)
+		}
+		if server.isRAGServer() {
+			host.ragServerName = name
+			host.logger.Printf("RAG server connected %s\n", name)
 		}
 
 		host.logger.Printf("Server connected %s\n", name)
@@ -262,6 +268,12 @@ func (host *MCPHost) loadMCPTools(ctx context.Context) error {
 					continue
 				}
 			}
+			if config.isRAGServer() {
+				// Ignore RAG-related tools
+				if tool.Name == ragToolName {
+					continue
+				}
+			}
 			filteredTools = append(filteredTools, tool)
 		}
 
@@ -297,11 +309,20 @@ func (host MCPHost) callTool(serverName string, toolName string, toolArgs map[st
 		req.Params.Name = toolName
 		req.Params.Arguments = toolArgs
 
+		host.logger.Printf(
+			"Tool %s called on server %s. Waiting response\n",
+			toolName,
+			serverName,
+		)
 		toolResultPtr, err := mcpClient.CallTool(
 			ctx,
 			req,
 		)
-
+		host.logger.Printf(
+			"Response received for tool %s on server %s\n",
+			toolName,
+			serverName,
+		)
 		resultCh <- result{toolResultPtr: toolResultPtr, err: err}
 
 	}()
@@ -453,4 +474,58 @@ func (host MCPHost) Recall(ctx context.Context) (string, error) {
 	}
 
 	return strings.TrimSpace(resultText), nil
+}
+
+// requests the memory server to recall the messages
+func (host MCPHost) GetRAGContext(ctx context.Context, prompt string) ([]string, error) {
+	if host.ragServerName == "" {
+		return []string{}, nil
+	}
+
+	// call the memory server to recall the messages
+	toolResultPtr, err := host.callTool(
+		host.ragServerName,
+		ragToolName,
+		map[string]interface{}{
+			"query": prompt,
+			"num":   3,
+		},
+		ctx,
+	)
+	if err != nil {
+		host.logger.Printf(
+			"Error calling RAG server: %v\n",
+			err,
+		)
+		return []string{}, err
+	}
+	if toolResultPtr == nil {
+		return []string{}, fmt.Errorf("no result from memory server")
+	}
+	if toolResultPtr.Content == nil {
+		return []string{}, fmt.Errorf("no content from memory server")
+	}
+	var resultText string
+	for _, item := range toolResultPtr.Content {
+		if contentMap, ok := item.(mcp.TextContent); ok {
+			resultText += fmt.Sprintf("%v ", contentMap.Text)
+		}
+	}
+	resultText = strings.TrimSpace(resultText)
+
+	if resultText == "none" {
+		return []string{}, nil
+	}
+
+	// split the result for chunks, empty line is a separator
+	results := []string{}
+	paragraphs := strings.Split(resultText, "\n\n")
+	for _, p := range paragraphs {
+		p = strings.TrimSpace(p)
+		if p != "" {
+			results = append(results, p)
+		}
+	}
+
+	return results, nil
 }
