@@ -84,7 +84,9 @@ type ServerConfigWrapper struct {
 }
 
 type RAGConfig struct {
-	ContextPrefix string `json:"context_prefix"`
+	ContextPrefix        string `json:"context_prefix"`
+	RequirePreprocessing bool   `json:"require_preprocessing"`
+	PreprocessingPrompt  string `json:"preprocessing_prompt"`
 }
 
 type CleverChattyConfig struct {

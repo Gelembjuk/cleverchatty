@@ -80,6 +80,8 @@ func (assistant *CleverChatty) addToMemory(role string, content string) {
 func (assistant *CleverChatty) injectMemories() {
 	// get memories if there are any
 	// TODO. Add timeouts to context
+	assistant.Callbacks.callMemoryRetrievalStarted()
+
 	memories, _ := assistant.mcpHost.Recall(context.Background())
 
 	if memories == "" {
@@ -100,6 +102,33 @@ func (assistant *CleverChatty) injectMemories() {
 
 func (assistant *CleverChatty) injectRAGContext(prompt string) {
 	// get RAG context if there are any
+	if !assistant.mcpHost.HasRagServer() {
+		// no RAG context configured, nothing to inject
+		return
+	}
+	// notify callbacks that we are starting RAG retrieval
+	assistant.Callbacks.callRAGRetrievalStarted()
+
+	if assistant.config.RAGConfig.RequirePreprocessing &&
+		assistant.config.RAGConfig.PreprocessingPrompt != "" {
+		// if preprocessing is required, we need to preprocess the prompt first
+		// Send a request to connected LLM provider to preprocess the prompt
+		instructionMessage := history.NewSystemInstructionMessage(assistant.config.RAGConfig.PreprocessingPrompt)
+
+		msg, err := assistant.provider.CreateMessage(
+			assistant.context,
+			prompt,
+			[]llm.Message{&instructionMessage},
+			assistant.mcpHost.tools,
+		)
+		if err == nil {
+			// if we got a response, use it as the prompt for RAG context
+			if msg.GetContent() != "" {
+				// modify the prompt to use the response from the LLM
+				prompt = msg.GetContent()
+			}
+		}
+	}
 	// TODO. Add timeouts to context
 	ragDocuments, err := assistant.mcpHost.GetRAGContext(context.Background(), prompt)
 
