@@ -221,6 +221,11 @@ func (host *MCPHost) createMCPClients() error {
 
 	return nil
 }
+
+// Check if the host has a RAG server connected
+func (host MCPHost) HasRagServer() bool {
+	return host.ragServerName != ""
+}
 func (host *MCPHost) Close() error {
 	errors := []error{}
 	for _, client := range host.clients {

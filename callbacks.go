@@ -12,6 +12,10 @@ type uiCallbacks struct {
 	// Tool call failed. After this the empty response is reported
 	// NOTE. This can be changed later to have something more intelligent here
 	toolCallFailed func(tool string, err error) error
+	// request to the memory server started
+	memoryRetrievalStarted func() error
+	// request to the RAG server started
+	ragRetrievalStarted func() error
 }
 
 // SetStartedPromptProcessing sets the callback function to be called when a prompt processing starts
@@ -75,6 +79,32 @@ func (c *uiCallbacks) SetToolCallFailed(f func(tool string, err error) error) {
 func (c *uiCallbacks) callToolCallFailed(tool string, err error) error {
 	if c.toolCallFailed != nil {
 		return c.toolCallFailed(tool, err)
+	}
+	return nil
+}
+
+// SetMemoryRetrievalStarted sets the callback function to be called when a memory retrieval starts
+func (c *uiCallbacks) SetMemoryRetrievalStarted(f func() error) {
+	c.memoryRetrievalStarted = f
+}
+
+// call memoryRetrievalStarted if it is set
+func (c *uiCallbacks) callMemoryRetrievalStarted() error {
+	if c.memoryRetrievalStarted != nil {
+		return c.memoryRetrievalStarted()
+	}
+	return nil
+}
+
+// SetRAGRetrievalStarted sets the callback function to be called when a RAG retrieval starts
+func (c *uiCallbacks) SetRAGRetrievalStarted(f func() error) {
+	c.ragRetrievalStarted = f
+}
+
+// call ragRetrievalStarted if it is set
+func (c *uiCallbacks) callRAGRetrievalStarted() error {
+	if c.ragRetrievalStarted != nil {
+		return c.ragRetrievalStarted()
 	}
 	return nil
 }
