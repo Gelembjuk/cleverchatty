@@ -4,7 +4,11 @@ go 1.24.1
 
 require (
 	github.com/google/generative-ai-go v0.19.0
+<<<<<<< HEAD
 	github.com/mark3labs/mcp-go v0.29.0
+=======
+	github.com/mark3labs/mcp-go v0.24.1
+>>>>>>> b50e177 (Streaming servers support. Initial changes)
 	github.com/ollama/ollama v0.5.1
 	google.golang.org/api v0.228.0
 )

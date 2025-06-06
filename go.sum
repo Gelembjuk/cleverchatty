@@ -39,8 +39,13 @@ github.com/kr/pretty v0.3.1 h1:flRD4NNwYAUpkphVc1HcthR4KEIFJ65n8Mw5qdRn3LE=
 github.com/kr/pretty v0.3.1/go.mod h1:hoEshYVHaxMs3cyo3Yncou5ZscifuDolrwPKZanG3xk=
 github.com/kr/text v0.2.0 h1:5Nx0Ya0ZqY2ygV366QzturHI13Jq95ApcVaJBhpS+AY=
 github.com/kr/text v0.2.0/go.mod h1:eLer722TekiGuMkidMxC/pM04lWEeraHUUmBw8l2grE=
+<<<<<<< HEAD
 github.com/mark3labs/mcp-go v0.29.0 h1:sH1NBcumKskhxqYzhXfGc201D7P76TVXiT0fGVhabeI=
 github.com/mark3labs/mcp-go v0.29.0/go.mod h1:rXqOudj/djTORU/ThxYx8fqEVj/5pvTuuebQ2RC7uk4=
+=======
+github.com/mark3labs/mcp-go v0.24.1 h1:YV+5X/+W4oBdERLWgiA1uR7AIvenlKJaa5V4hqufI7E=
+github.com/mark3labs/mcp-go v0.24.1/go.mod h1:rXqOudj/djTORU/ThxYx8fqEVj/5pvTuuebQ2RC7uk4=
+>>>>>>> b50e177 (Streaming servers support. Initial changes)
 github.com/ollama/ollama v0.5.1 h1:Ug4y/5UZZoTgetMklZslAlEdaCnYEX9qZJ/aTsM4+xc=
 github.com/ollama/ollama v0.5.1/go.mod h1:wrgnDTdogU9yeFOj/Jc8BpRBJrWu+Ox4eGyHxqiaQDc=
 github.com/pmezard/go-difflib v1.0.0 h1:4DBwDE0NGyQoBHbLQYPwSUPoCMWR5BEzIk/f1lZbAQM=
