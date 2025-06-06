@@ -149,8 +149,6 @@ func (host *MCPHost) createMCPClients() error {
 				sseConfig.Url,
 				options...,
 			)
-<<<<<<< HEAD
-=======
 		} else if server.Config.GetType() == transportHTTPStreaming {
 			httpConfig := server.Config.(HTTPStreamingServerConfig)
 
@@ -174,7 +172,6 @@ func (host *MCPHost) createMCPClients() error {
 				httpConfig.Url,
 				options...,
 			)
->>>>>>> b50e177 (Streaming servers support. Initial changes)
 		} else if server.Config.GetType() == transportInternal {
 			internalConfig := server.Config.(InternalServerConfig)
 
