@@ -149,6 +149,29 @@ func (host *MCPHost) createMCPClients() error {
 				sseConfig.Url,
 				options...,
 			)
+		} else if server.Config.GetType() == transportHTTPStreaming {
+			httpConfig := server.Config.(HTTPStreamingServerConfig)
+
+			options := []transport.StreamableHTTPCOption{}
+
+			if httpConfig.Headers != nil {
+				// Parse headers from the config
+				headers := make(map[string]string)
+				for _, header := range httpConfig.Headers {
+					parts := strings.SplitN(header, ":", 2)
+					if len(parts) == 2 {
+						key := strings.TrimSpace(parts[0])
+						value := strings.TrimSpace(parts[1])
+						headers[key] = value
+					}
+				}
+				options = append(options, transport.WithHTTPHeaders(headers))
+			}
+
+			client, err = mcpclient.NewStreamableHttpClient(
+				httpConfig.Url,
+				options...,
+			)
 		} else if server.Config.GetType() == transportInternal {
 			internalConfig := server.Config.(InternalServerConfig)
 
