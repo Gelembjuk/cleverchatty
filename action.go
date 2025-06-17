@@ -77,12 +77,12 @@ func (assistant *CleverChatty) addToMemory(role string, content string) {
 	}, context.Background())
 }
 
-func (assistant *CleverChatty) injectMemories() {
+func (assistant *CleverChatty) injectMemories(prompt string) {
 	// get memories if there are any
 	// TODO. Add timeouts to context
 	assistant.Callbacks.callMemoryRetrievalStarted()
 
-	memories, _ := assistant.mcpHost.Recall(context.Background())
+	memories, _ := assistant.mcpHost.Recall(context.Background(), prompt)
 
 	if memories == "" {
 		return // no memories to inject
@@ -96,6 +96,8 @@ func (assistant *CleverChatty) injectMemories() {
 		}
 	}
 	assistant.messages = filteredMessages
+
+	assistant.logger.Printf("Injecting memories into the history: %s\n", memories)
 
 	assistant.messages = append(assistant.messages, history.NewMemoryNoteMessage(memories))
 }
@@ -167,7 +169,7 @@ func (assistant *CleverChatty) Prompt(prompt string) (string, error) {
 	assistant.Callbacks.callStartedPromptProcessing(prompt)
 
 	// if there are memories, inject them into the history
-	assistant.injectMemories()
+	assistant.injectMemories(prompt)
 	// if there is RAG server configured, do request to it and inject in messages
 	assistant.injectRAGContext(prompt)
 

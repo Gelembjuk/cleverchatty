@@ -464,7 +464,7 @@ func (host MCPHost) Remember(role string, content history.ContentBlock, ctx cont
 }
 
 // requests the memory server to recall the messages
-func (host MCPHost) Recall(ctx context.Context) (string, error) {
+func (host MCPHost) Recall(ctx context.Context, prompt string) (string, error) {
 	if host.memoryServerName == "" {
 		return "", nil
 	}
@@ -473,7 +473,9 @@ func (host MCPHost) Recall(ctx context.Context) (string, error) {
 	toolResultPtr, err := host.callTool(
 		host.memoryServerName,
 		memoryToolRecallName,
-		map[string]interface{}{},
+		map[string]interface{}{
+			"query": prompt,
+		},
 		ctx,
 	)
 	if err != nil {
