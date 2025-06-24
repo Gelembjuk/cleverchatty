@@ -1,4 +1,4 @@
-package cleverchatty
+package core
 
 import (
 	"context"
@@ -7,8 +7,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/gelembjuk/cleverchatty/history"
-	"github.com/gelembjuk/cleverchatty/llm"
+	"github.com/gelembjuk/cleverchatty/core/history"
+	"github.com/gelembjuk/cleverchatty/core/llm"
 	"github.com/mark3labs/mcp-go/mcp"
 )
 

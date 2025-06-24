@@ -5,7 +5,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/gelembjuk/cleverchatty/llm"
+	"github.com/gelembjuk/cleverchatty/core/llm"
 	api "github.com/ollama/ollama/api"
 )
 

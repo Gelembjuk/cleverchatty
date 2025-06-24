@@ -1,4 +1,4 @@
-package cleverchatty
+package core
 
 type uiCallbacks struct {
 	// Is called when a prompt processing started. It could be used to display a user's prompt in a progressing state.

@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/gelembjuk/cleverchatty/llm"
+	"github.com/gelembjuk/cleverchatty/core/llm"
 )
 
 type CreateRequest struct {

@@ -1,4 +1,4 @@
-package cleverchatty
+package core
 
 import (
 	"context"
@@ -6,13 +6,13 @@ import (
 	"log"
 	"strings"
 
-	"github.com/gelembjuk/cleverchatty/history"
-	"github.com/gelembjuk/cleverchatty/llm"
-	"github.com/gelembjuk/cleverchatty/llm/anthropic"
-	"github.com/gelembjuk/cleverchatty/llm/google"
-	"github.com/gelembjuk/cleverchatty/llm/ollama"
-	"github.com/gelembjuk/cleverchatty/llm/openai"
-	"github.com/gelembjuk/cleverchatty/test"
+	"github.com/gelembjuk/cleverchatty/core/history"
+	"github.com/gelembjuk/cleverchatty/core/llm"
+	"github.com/gelembjuk/cleverchatty/core/llm/anthropic"
+	"github.com/gelembjuk/cleverchatty/core/llm/google"
+	"github.com/gelembjuk/cleverchatty/core/llm/ollama"
+	"github.com/gelembjuk/cleverchatty/core/llm/openai"
+	"github.com/gelembjuk/cleverchatty/core/test"
 )
 
 type CleverChatty struct {

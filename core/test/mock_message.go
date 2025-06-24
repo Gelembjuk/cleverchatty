@@ -1,7 +1,7 @@
 package test
 
 import (
-	"github.com/gelembjuk/cleverchatty/llm"
+	"github.com/gelembjuk/cleverchatty/core/llm"
 )
 
 type MockMessage struct {

@@ -1,4 +1,4 @@
-package cleverchatty
+package core
 
 import (
 	"context"

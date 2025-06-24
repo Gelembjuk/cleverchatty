@@ -7,8 +7,8 @@ import (
 	"log"
 	"strings"
 
-	"github.com/gelembjuk/cleverchatty/history"
-	"github.com/gelembjuk/cleverchatty/llm"
+	"github.com/gelembjuk/cleverchatty/core/history"
+	"github.com/gelembjuk/cleverchatty/core/llm"
 	"github.com/google/generative-ai-go/genai"
 	"google.golang.org/api/option"
 )

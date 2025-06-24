@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/gelembjuk/cleverchatty/llm"
+	"github.com/gelembjuk/cleverchatty/core/llm"
 	"github.com/google/generative-ai-go/genai"
 )
 

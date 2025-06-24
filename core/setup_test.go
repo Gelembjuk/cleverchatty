@@ -1,10 +1,10 @@
-package cleverchatty
+package core
 
 import (
 	"context"
 	"testing"
 
-	"github.com/gelembjuk/cleverchatty/test"
+	"github.com/gelembjuk/cleverchatty/core/test"
 )
 
 func TestObjectCreate(t *testing.T) {

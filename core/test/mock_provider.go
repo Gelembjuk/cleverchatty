@@ -6,8 +6,8 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/gelembjuk/cleverchatty/history"
-	"github.com/gelembjuk/cleverchatty/llm"
+	"github.com/gelembjuk/cleverchatty/core/history"
+	"github.com/gelembjuk/cleverchatty/core/llm"
 )
 
 type MockProvider struct {
