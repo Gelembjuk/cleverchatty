@@ -22,12 +22,17 @@ const (
 	defaultMessagesWindow    = 10
 	initialBackoff           = 1 * time.Second
 	maxBackoff               = 30 * time.Second
-	maxRetries               = 5 // Will reach close to max backoff
+	maxRetries               = 5    // Will reach close to max backoff
+	defaultSessionTimeout    = 3600 // Default session timeout
 )
 
 const (
 	commentOnNotificationReceived = "Notification received from server: %s. The tool %s has been called. The next message is the content of the notification."
 )
+
+type ServerConfig struct {
+	SessionTimeout int `json:"session_timeout"`
+}
 
 type OpenAIConfig struct {
 	APIKey       string `json:"apikey"`
@@ -46,7 +51,7 @@ type GoogleConfig struct {
 	DefaultModel string `json:"default_model"`
 }
 
-type ServerConfig interface {
+type MCPServerConfig interface {
 	GetType() string
 }
 
@@ -87,7 +92,7 @@ func (s InternalServerConfig) GetType() string {
 }
 
 type ServerConfigWrapper struct {
-	Config    ServerConfig
+	Config    MCPServerConfig
 	Interface string `json:"interface"`
 	Disabled  bool   `json:"disabled"`
 	Required  bool   `json:"required"`
@@ -99,7 +104,21 @@ type RAGConfig struct {
 	PreprocessingPrompt  string `json:"preprocessing_prompt"`
 }
 
+type A2AServerConfig struct {
+	Enabled      bool   `json:"enabled"`
+	Url          string `json:"url"`
+	Title        string `json:"title"`
+	Description  string `json:"description"`
+	ListenHost   string `json:"listen_host"`
+	Organization string `json:"organization"`
+}
+
+type A2AConnection struct {
+	Endpoint string `json:"endpoint"`
+}
+
 type CleverChattyConfig struct {
+	ServerConfig      ServerConfig                   `json:"server"`
 	LogFilePath       string                         `json:"log_file_path"`
 	DebugMode         bool                           `json:"debug_mode"`
 	MessageWindow     int                            `json:"message_window"`
@@ -108,19 +127,24 @@ type CleverChattyConfig struct {
 	Anthropic         AnthropicConfig                `json:"anthropic"`
 	OpenAI            OpenAIConfig                   `json:"openai"`
 	Google            GoogleConfig                   `json:"google"`
-	MCPServers        map[string]ServerConfigWrapper `json:"mcpServers"`
+	MCPConnections    map[string]ServerConfigWrapper `json:"mcp_connections,omitempty"`
+	A2AConnections    map[string]A2AConnection       `json:"a2a_connections,omitempty"`
 	RAGConfig         RAGConfig                      `json:"rag_settings"`
+	A2AServerConfig   A2AServerConfig                `json:"a2a_settings"`
 }
 
 func CreateStandardConfigFile(configPath string) (*CleverChattyConfig, error) {
 	// Create the config file with default values
 	defaultConfig := CleverChattyConfig{
-		LogFilePath:   "cleverchatty.log",
-		DebugMode:     false,
-		MessageWindow: 10,
-		Model:         "",
-		MCPServers:    make(map[string]ServerConfigWrapper),
-		RAGConfig:     RAGConfig{ContextPrefix: "Context:"},
+		ServerConfig: ServerConfig{
+			SessionTimeout: defaultSessionTimeout,
+		},
+		LogFilePath:    "cleverchatty.log",
+		DebugMode:      false,
+		MessageWindow:  10,
+		Model:          "",
+		MCPConnections: make(map[string]ServerConfigWrapper),
+		RAGConfig:      RAGConfig{ContextPrefix: "Context:"},
 	}
 
 	configData, err := json.MarshalIndent(defaultConfig, "", "  ")
@@ -158,6 +182,9 @@ func LoadConfig(configPath string) (*CleverChattyConfig, error) {
 
 	if config.MessageWindow <= 0 {
 		config.MessageWindow = defaultMessagesWindow
+	}
+	if config.ServerConfig.SessionTimeout <= 0 {
+		config.ServerConfig.SessionTimeout = defaultSessionTimeout
 	}
 
 	return &config, nil
@@ -218,14 +245,14 @@ func (w ServerConfigWrapper) isRAGServer() bool {
 	return w.Interface == mcpServerInterfaceRAG
 }
 
-func initLogger(config *CleverChattyConfig) (*log.Logger, error) {
+func InitLogger(logFilePath string, debugMMode bool) (*log.Logger, error) {
 	// Initialize the logger with the specified log file path
 	var logger *log.Logger
 
-	if config.LogFilePath == "stdout" {
+	if logFilePath == "stdout" {
 		logger = log.New(os.Stdout, "", log.LstdFlags)
-	} else if config.LogFilePath != "" {
-		f1, err := os.OpenFile(config.LogFilePath, os.O_RDWR|os.O_CREATE|os.O_APPEND, 0666)
+	} else if logFilePath != "" {
+		f1, err := os.OpenFile(logFilePath, os.O_RDWR|os.O_CREATE|os.O_APPEND, 0666)
 
 		if err != nil {
 			return nil, fmt.Errorf("error opening log file: %v", err)
@@ -237,7 +264,7 @@ func initLogger(config *CleverChattyConfig) (*log.Logger, error) {
 	}
 
 	// Set the log level based on the debug flag
-	if config.DebugMode {
+	if debugMMode {
 		logger.SetFlags(log.LstdFlags | log.Lshortfile)
 	}
 	return logger, nil

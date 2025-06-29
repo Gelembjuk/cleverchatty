@@ -22,21 +22,24 @@ type CleverChatty struct {
 	provider  llm.Provider
 	mcpHost   *MCPHost
 	messages  []history.HistoryMessage
-	Callbacks uiCallbacks
+	Callbacks UICallbacks
 }
 
 func GetCleverChatty(config CleverChattyConfig, ctx context.Context) (*CleverChatty, error) {
+	logger, err := InitLogger(config.LogFilePath, config.DebugMode)
+
+	if err != nil {
+		return nil, fmt.Errorf("error initializing logger: %v", err)
+	}
+	return GetCleverChattyWithLogger(config, ctx, logger)
+}
+
+func GetCleverChattyWithLogger(config CleverChattyConfig, ctx context.Context, logger *log.Logger) (*CleverChatty, error) {
 	if config.MessageWindow <= 0 {
 		config.MessageWindow = defaultMessagesWindow
 	}
 	assistant := &CleverChatty{
 		config: config,
-	}
-	// configure logger
-	logger, err := initLogger(&config)
-
-	if err != nil {
-		return nil, fmt.Errorf("error initializing logger: %v", err)
 	}
 
 	assistant.context = ctx
@@ -45,15 +48,16 @@ func GetCleverChatty(config CleverChattyConfig, ctx context.Context) (*CleverCha
 
 	assistant.messages = make([]history.HistoryMessage, 0)
 
-	assistant.Callbacks = uiCallbacks{}
+	assistant.Callbacks = UICallbacks{}
 
+	var err error
 	assistant.provider, err = assistant.createProvider(ctx, config.Model)
 
 	if err != nil {
 		return nil, fmt.Errorf("error creating provider: %v", err)
 	}
 
-	assistant.mcpHost, err = newMCPHost(config.MCPServers, logger, ctx)
+	assistant.mcpHost, err = newMCPHost(config.MCPConnections, logger, ctx)
 
 	if err != nil {
 		return nil, fmt.Errorf("error creating MCP host: %v", err)
@@ -64,6 +68,11 @@ func GetCleverChatty(config CleverChattyConfig, ctx context.Context) (*CleverCha
 
 func (assistant *CleverChatty) WithLogger(logger *log.Logger) {
 	assistant.logger = logger
+}
+
+func (assistant *CleverChatty) WithCallbacks(callbacks UICallbacks) {
+	assistant.Callbacks = callbacks
+
 }
 
 // Add new function to create provider

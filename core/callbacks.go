@@ -1,6 +1,16 @@
 package core
 
-type uiCallbacks struct {
+var (
+	CallbackCodePromptProcessing = "prompt_accepted"
+	CallbackCodeStartedThinking  = "thinking"
+	CallbackCodeResponseReceived = "response_received"
+	CallbackCodeToolCalling      = "tool_calling"
+	CallbackCodeToolCallFailed   = "tool_error"
+	CallbackCodeMemoryRetrieval  = "memory_retrieval"
+	CallbackCodeRAGRetrieval     = "rag_retrieval"
+)
+
+type UICallbacks struct {
 	// Is called when a prompt processing started. It could be used to display a user's prompt in a progressing state.
 	startedPromptProcessing func(prompt string) error
 	// Request to LLM started
@@ -19,12 +29,12 @@ type uiCallbacks struct {
 }
 
 // SetStartedPromptProcessing sets the callback function to be called when a prompt processing starts
-func (c *uiCallbacks) SetStartedPromptProcessing(f func(prompt string) error) {
+func (c *UICallbacks) SetStartedPromptProcessing(f func(prompt string) error) {
 	c.startedPromptProcessing = f
 }
 
 // call startedPromptProcessing if it is set
-func (c *uiCallbacks) callStartedPromptProcessing(prompt string) error {
+func (c *UICallbacks) CallStartedPromptProcessing(prompt string) error {
 	if c.startedPromptProcessing != nil {
 		return c.startedPromptProcessing(prompt)
 	}
@@ -32,12 +42,12 @@ func (c *uiCallbacks) callStartedPromptProcessing(prompt string) error {
 }
 
 // SetStartedThinking sets the callback function to be called when a prompt processing starts
-func (c *uiCallbacks) SetStartedThinking(f func() error) {
+func (c *UICallbacks) SetStartedThinking(f func() error) {
 	c.startedThinking = f
 }
 
 // call startedThinking if it is set
-func (c *uiCallbacks) callStartedThinking() error {
+func (c *UICallbacks) CallStartedThinking() error {
 	if c.startedThinking != nil {
 		return c.startedThinking()
 	}
@@ -45,12 +55,12 @@ func (c *uiCallbacks) callStartedThinking() error {
 }
 
 // SetResponseReceived sets the callback function to be called when a response is received
-func (c *uiCallbacks) SetResponseReceived(f func(response string) error) {
+func (c *UICallbacks) SetResponseReceived(f func(response string) error) {
 	c.responseReceived = f
 }
 
 // call responseReceived if it is set
-func (c *uiCallbacks) callResponseReceived(response string) error {
+func (c *UICallbacks) CallResponseReceived(response string) error {
 	if c.responseReceived != nil {
 		return c.responseReceived(response)
 	}
@@ -58,12 +68,12 @@ func (c *uiCallbacks) callResponseReceived(response string) error {
 }
 
 // SetToolCalling sets the callback function to be called when a tool is called
-func (c *uiCallbacks) SetToolCalling(f func(tool string) error) {
+func (c *UICallbacks) SetToolCalling(f func(tool string) error) {
 	c.toolCalling = f
 }
 
 // call toolCalling if it is set
-func (c *uiCallbacks) callToolCalling(tool string) error {
+func (c *UICallbacks) CallToolCalling(tool string) error {
 	if c.toolCalling != nil {
 		return c.toolCalling(tool)
 	}
@@ -71,12 +81,12 @@ func (c *uiCallbacks) callToolCalling(tool string) error {
 }
 
 // SetToolCallFailed sets the callback function to be called when a tool call fails
-func (c *uiCallbacks) SetToolCallFailed(f func(tool string, err error) error) {
+func (c *UICallbacks) SetToolCallFailed(f func(tool string, err error) error) {
 	c.toolCallFailed = f
 }
 
 // call toolCallFailed if it is set
-func (c *uiCallbacks) callToolCallFailed(tool string, err error) error {
+func (c *UICallbacks) CallToolCallFailed(tool string, err error) error {
 	if c.toolCallFailed != nil {
 		return c.toolCallFailed(tool, err)
 	}
@@ -84,12 +94,12 @@ func (c *uiCallbacks) callToolCallFailed(tool string, err error) error {
 }
 
 // SetMemoryRetrievalStarted sets the callback function to be called when a memory retrieval starts
-func (c *uiCallbacks) SetMemoryRetrievalStarted(f func() error) {
+func (c *UICallbacks) SetMemoryRetrievalStarted(f func() error) {
 	c.memoryRetrievalStarted = f
 }
 
 // call memoryRetrievalStarted if it is set
-func (c *uiCallbacks) callMemoryRetrievalStarted() error {
+func (c *UICallbacks) CallMemoryRetrievalStarted() error {
 	if c.memoryRetrievalStarted != nil {
 		return c.memoryRetrievalStarted()
 	}
@@ -97,12 +107,12 @@ func (c *uiCallbacks) callMemoryRetrievalStarted() error {
 }
 
 // SetRAGRetrievalStarted sets the callback function to be called when a RAG retrieval starts
-func (c *uiCallbacks) SetRAGRetrievalStarted(f func() error) {
+func (c *UICallbacks) SetRAGRetrievalStarted(f func() error) {
 	c.ragRetrievalStarted = f
 }
 
 // call ragRetrievalStarted if it is set
-func (c *uiCallbacks) callRAGRetrievalStarted() error {
+func (c *UICallbacks) CallRAGRetrievalStarted() error {
 	if c.ragRetrievalStarted != nil {
 		return c.ragRetrievalStarted()
 	}

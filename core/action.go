@@ -80,7 +80,7 @@ func (assistant *CleverChatty) addToMemory(role string, content string) {
 func (assistant *CleverChatty) injectMemories(prompt string) {
 	// get memories if there are any
 	// TODO. Add timeouts to context
-	assistant.Callbacks.callMemoryRetrievalStarted()
+	assistant.Callbacks.CallMemoryRetrievalStarted()
 
 	memories, _ := assistant.mcpHost.Recall(context.Background(), prompt)
 
@@ -109,7 +109,7 @@ func (assistant *CleverChatty) injectRAGContext(prompt string) {
 		return
 	}
 	// notify callbacks that we are starting RAG retrieval
-	assistant.Callbacks.callRAGRetrievalStarted()
+	assistant.Callbacks.CallRAGRetrievalStarted()
 
 	if assistant.config.RAGConfig.RequirePreprocessing &&
 		assistant.config.RAGConfig.PreprocessingPrompt != "" {
@@ -166,7 +166,7 @@ func (assistant *CleverChatty) Prompt(prompt string) (string, error) {
 
 	assistant.pruneMessages()
 
-	assistant.Callbacks.callStartedPromptProcessing(prompt)
+	assistant.Callbacks.CallStartedPromptProcessing(prompt)
 
 	// if there are memories, inject them into the history
 	assistant.injectMemories(prompt)
@@ -202,7 +202,7 @@ func (assistant *CleverChatty) processPrompt(prompt string) (string, error) {
 	}
 
 	for {
-		assistant.Callbacks.callStartedThinking()
+		assistant.Callbacks.CallStartedThinking()
 
 		type result struct {
 			message llm.Message
@@ -263,7 +263,7 @@ func (assistant *CleverChatty) processPrompt(prompt string) (string, error) {
 
 	// Add text content
 	if message.GetContent() != "" {
-		assistant.Callbacks.callResponseReceived(message.GetContent())
+		assistant.Callbacks.CallResponseReceived(message.GetContent())
 
 		messageContent = append(messageContent, history.ContentBlock{
 			Type: "text",
@@ -291,7 +291,7 @@ func (assistant *CleverChatty) processPrompt(prompt string) (string, error) {
 				inputTokens, outputTokens, inputTokens+outputTokens)
 		}
 
-		assistant.Callbacks.callToolCalling(toolCall.GetName())
+		assistant.Callbacks.CallToolCalling(toolCall.GetName())
 
 		parts := strings.Split(toolCall.GetName(), "__")
 		if len(parts) != 2 {
@@ -313,7 +313,7 @@ func (assistant *CleverChatty) processPrompt(prompt string) (string, error) {
 				toolCall.GetName(),
 				err,
 			)
-			assistant.Callbacks.callToolCallFailed(toolCall.GetName(), err)
+			assistant.Callbacks.CallToolCallFailed(toolCall.GetName(), err)
 
 			// Add error message as tool result
 			toolResults = append(toolResults, history.ContentBlock{

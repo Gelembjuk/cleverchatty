@@ -1,2 +1,8 @@
 .vscode
 .vscode/*
+
+tests
+tests/*
+
+cleverchatty-cli/cleverchatty-cli
+cleverchatty-server/cleverchatty-server

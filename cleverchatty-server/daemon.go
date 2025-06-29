@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"log"
 	"os"
@@ -8,13 +9,15 @@ import (
 	"os/signal"
 	"strconv"
 	"syscall"
-	"time"
 
+	cleverchatty "github.com/gelembjuk/cleverchatty/core"
 	"github.com/spf13/cobra"
 )
 
 const (
-	version = "0.1.0"
+	version        = "0.1.0"
+	configFileName = "cleverchatty_config.json"
+	pidFileName    = "cleverchatty-server.pid"
 )
 
 var directoryPath string
@@ -95,7 +98,7 @@ func init() {
 		directoryPath, _ = os.Getwd()
 	}
 
-	pidFilePath = directoryPath + "/cleverchatty-server.pid"
+	pidFilePath = directoryPath + "/" + pidFileName
 }
 
 func main() {
@@ -109,6 +112,12 @@ func startDaemon() error {
 		return fmt.Errorf("daemon is already running")
 	}
 
+	// try to load config to verify it is present and valid
+	_, _, err := loadConfigAndLogger()
+	if err != nil {
+		return fmt.Errorf("failed to load config: %v", err)
+	}
+
 	// Fork the process
 	cmd := exec.Command(os.Args[0], "run", "--directory", directoryPath)
 	cmd.Stdout = nil
@@ -117,7 +126,7 @@ func startDaemon() error {
 	cmd.SysProcAttr = &syscall.SysProcAttr{
 		Setsid: true,
 	}
-	err := cmd.Start()
+	err = cmd.Start()
 	if err != nil {
 		return fmt.Errorf("failed to start daemon: %v", err)
 	}
@@ -180,28 +189,92 @@ func readPid() (int, error) {
 
 // The actual daemon logic
 func runServer() error {
+	config, logger, err := loadConfigAndLogger()
+	if err != nil {
+		return fmt.Errorf("failed to load config: %v", err)
+	}
+
 	sigs := make(chan os.Signal, 1)
 	signal.Notify(sigs, syscall.SIGTERM, syscall.SIGHUP)
 
-	fmt.Println("Daemon running...")
+	logger.Println("Daemon running...")
 
-	for {
-		select {
-		case sig := <-sigs:
-			switch sig {
-			case syscall.SIGTERM:
-				fmt.Println("Stopping daemon...")
-				os.Remove(pidFilePath)
-				return nil
-			case syscall.SIGHUP:
-				fmt.Println("Reloading config...")
-				// Reload logic here
+	commonContext, commonContextCancel := context.WithCancel(context.Background())
+
+	sessions_manager := cleverchatty.NewSessionManager(config, commonContext, logger)
+	sessions_manager.StartCleanupLoop()
+
+	var a2aServer *A2AServer
+	a2aServer = nil
+
+	if config.A2AServerConfig.Enabled {
+		a2aServer, err = getA2AServer(
+			sessions_manager,
+			&config.A2AServerConfig,
+			directoryPath,
+			logger)
+		if err != nil {
+			return fmt.Errorf("failed to initialize A2A server: %v", err)
+		}
+		err = a2aServer.Start()
+		if err != nil {
+			return fmt.Errorf("failed to start A2A server: %v", err)
+		}
+		logger.Println("A2A server started successfully.")
+	}
+
+	shutDown := func() {
+		if a2aServer != nil {
+			logger.Println("Stopping A2A server...")
+			err := a2aServer.Stop()
+			if err != nil {
+				logger.Printf("Error stopping A2A server: %v", err)
+			} else {
+				logger.Println("A2A server stopped successfully.")
 			}
-		default:
-			// Your server logic here
-			fmt.Println("Server is running...")
-			time.Sleep(2 * time.Second)
+			a2aServer = nil
+		}
+		commonContextCancel()
+		logger.Println("Daemon shutting down.")
+	}
+	defer shutDown()
+	for sig := range sigs {
+		switch sig {
+		case syscall.SIGTERM:
+			fmt.Println("Stopping daemon...")
+			shutDown()
+			os.Remove(pidFilePath)
+			return nil
+		case syscall.SIGHUP:
+			fmt.Println("Reloading config...")
+			// Reload logic here
 		}
 	}
 	return nil
+}
+
+func loadConfigAndLogger() (config *cleverchatty.CleverChattyConfig, logger *log.Logger, err error) {
+
+	configFile := directoryPath + "/" + configFileName
+	if _, err = os.Stat(configFile); os.IsNotExist(err) {
+		err = fmt.Errorf("config file not found: %s", configFile)
+		return
+	}
+	config, err = cleverchatty.LoadConfig(configFile)
+
+	if err != nil {
+		return
+	}
+
+	// confirm there is at least one server to run
+	if config.A2AServerConfig.Enabled {
+		logger, err = cleverchatty.InitLogger(config.LogFilePath, config.DebugMode)
+		if err != nil {
+			err = fmt.Errorf("error initializing logger: %v", err)
+			return
+		}
+		return
+	}
+	err = fmt.Errorf("No any kind of server configured. It must be A2A (or other in future)")
+	return
 }

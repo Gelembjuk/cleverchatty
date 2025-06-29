@@ -9,8 +9,8 @@ import (
 
 func TestObjectCreate(t *testing.T) {
 	cleverChattyObj, err := GetCleverChatty(CleverChattyConfig{
-		Model:      "mock:mock",
-		MCPServers: map[string]ServerConfigWrapper{},
+		Model:          "mock:mock",
+		MCPConnections: map[string]ServerConfigWrapper{},
 	}, nil)
 
 	if err != nil {
@@ -33,7 +33,7 @@ func TestObjectCreate(t *testing.T) {
 func TestObjectWithOneServerCreate(t *testing.T) {
 	cleverChattyObj, err := GetCleverChatty(CleverChattyConfig{
 		Model: "mock:mock",
-		MCPServers: map[string]ServerConfigWrapper{
+		MCPConnections: map[string]ServerConfigWrapper{
 			"test": {
 				Config: InternalServerConfig{
 					Kind: "mock",
