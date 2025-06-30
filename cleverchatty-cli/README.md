@@ -1,10 +1,14 @@
 # CleverChatty CLi
 
-The CLI application based on the [CleverChatty](https://github.com/Gelembjuk/cleverchatty) package.
+The CLI application CleverChatty.
 
-This application is the comand line AI chat tool. It allows to comunicate with veriety of LLMs and it has support of external tools calls using the MCP(Model Context Protocol).
+This application is the command line AI chat tool. It allows to communicate with variety of LLMs and it has support of external tools calls using the MCP(Model Context Protocol).
+
+It can be execute as a standalone tool or as a client for the CleverChatty server.
 
 ## Quick run
+
+### As a standalone tool
 
 Install some model with ollama, for example, `qwen2.5:3b`:
 
@@ -19,19 +23,32 @@ qwen2.5:3b             357c53fb659c    1.9 GB    3 weeks ago
 And chat with this model.
 
 ```
-go run github.com/gelembjuk/cleverchatty-cli@latest -m ollama:qwen2.5:3b
+go run github.com/gelembjuk/cleverchatty/cleverchatty-cli@latest -m ollama:qwen2.5:3b
 ```
 
 Or, when you clone the repo, you can run it with:
 
 ```
+cd cleverchatty-cli
 go build
 ./cleverchatty-cli -m ollama:qwen2.5:3b
 ```
 
-However, this tool is really useful when you use some MCP servers. It is possible by creating a config file and adding the list of MCP servers to it.
+This tool is really useful when you use some MCP servers. It is possible by creating a config file and adding the list of MCP servers to it.
+
+### As a client for the CleverChatty server
+
+Presume, you have a CleverChatty server running on `somehost:8000` (it is the A2A protocol server), you can run the CLI tool as a client for the server:
+
+```
+go run github.com/gelembjuk/cleverchatty/cleverchatty-cli@latest --server http://somehost:8000
+```
+
+In this mode you do not need to specify a model, to install and manage it, as the server will handle the request.
 
 ## Config
+
+Thye config is an option only for the standalone mode. It allows to specify the model, the MCP servers, and other options.
 
 The config is not required. Most options from the config can be overriden with the command line arguments.
 
