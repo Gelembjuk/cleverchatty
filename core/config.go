@@ -10,20 +10,21 @@ import (
 )
 
 const (
-	thisToolName             = "CleverChatty"
-	thisToolVersion          = "0.1.0"
-	transportStdio           = "stdio"
-	transportHTTPStreaming   = "http_streaming"
-	transportSSE             = "sse"
-	transportInternal        = "internal"
-	mcpServerInterfaceNone   = "none"
-	mcpServerInterfaceMemory = "memory"
-	mcpServerInterfaceRAG    = "rag"
-	defaultMessagesWindow    = 10
-	initialBackoff           = 1 * time.Second
-	maxBackoff               = 30 * time.Second
-	maxRetries               = 5    // Will reach close to max backoff
-	defaultSessionTimeout    = 3600 // Default session timeout
+	thisToolName               = "CleverChatty"
+	thisToolVersion            = "0.1.0"
+	transportStdio             = "stdio"
+	transportHTTPStreaming     = "http_streaming"
+	transportSSE               = "sse"
+	transportA2A               = "a2a"
+	transportInternal          = "internal"
+	toolsServerInterfaceNone   = "none"
+	toolsServerInterfaceMemory = "memory"
+	toolsServerInterfaceRAG    = "rag"
+	defaultMessagesWindow      = 10
+	initialBackoff             = 1 * time.Second
+	maxBackoff                 = 30 * time.Second
+	maxRetries                 = 5    // Will reach close to max backoff
+	defaultSessionTimeout      = 3600 // Default session timeout
 )
 
 const (
@@ -51,36 +52,45 @@ type GoogleConfig struct {
 	DefaultModel string `json:"default_model"`
 }
 
-type MCPServerConfig interface {
+type ToolsServerConfig interface {
 	GetType() string
 }
 
-type STDIOServerConfig struct {
+type STDIOMCPServerConfig struct {
 	Command string            `json:"command"`
 	Args    []string          `json:"args"`
 	Env     map[string]string `json:"env,omitempty"`
 }
 
-func (s STDIOServerConfig) GetType() string {
+func (s STDIOMCPServerConfig) GetType() string {
 	return transportStdio
 }
 
-type HTTPStreamingServerConfig struct {
+type HTTPStreamingMCPServerConfig struct {
 	Url     string   `json:"url"`
 	Headers []string `json:"headers,omitempty"`
 }
 
-func (s HTTPStreamingServerConfig) GetType() string {
+func (s HTTPStreamingMCPServerConfig) GetType() string {
 	return transportHTTPStreaming
 }
 
-type SSEServerConfig struct {
+type SSEMCPServerConfig struct {
 	Url     string   `json:"url"`
 	Headers []string `json:"headers,omitempty"`
 }
 
-func (s SSEServerConfig) GetType() string {
+func (s SSEMCPServerConfig) GetType() string {
 	return transportSSE
+}
+
+type A2AToolsServerConfig struct {
+	Endpoint string   `json:"endpoint"`
+	Headers  []string `json:"headers,omitempty"`
+}
+
+func (s A2AToolsServerConfig) GetType() string {
+	return transportA2A
 }
 
 type InternalServerConfig struct {
@@ -92,7 +102,7 @@ func (s InternalServerConfig) GetType() string {
 }
 
 type ServerConfigWrapper struct {
-	Config    MCPServerConfig
+	Config    ToolsServerConfig
 	Interface string `json:"interface"`
 	Disabled  bool   `json:"disabled"`
 	Required  bool   `json:"required"`
@@ -113,10 +123,6 @@ type A2AServerConfig struct {
 	Organization string `json:"organization"`
 }
 
-type A2AConnection struct {
-	Endpoint string `json:"endpoint"`
-}
-
 type CleverChattyConfig struct {
 	ServerConfig      ServerConfig                   `json:"server"`
 	LogFilePath       string                         `json:"log_file_path"`
@@ -127,8 +133,7 @@ type CleverChattyConfig struct {
 	Anthropic         AnthropicConfig                `json:"anthropic"`
 	OpenAI            OpenAIConfig                   `json:"openai"`
 	Google            GoogleConfig                   `json:"google"`
-	MCPConnections    map[string]ServerConfigWrapper `json:"mcp_connections,omitempty"`
-	A2AConnections    map[string]A2AConnection       `json:"a2a_connections,omitempty"`
+	ToolsServers      map[string]ServerConfigWrapper `json:"tools_servers,omitempty"`
 	RAGConfig         RAGConfig                      `json:"rag_settings"`
 	A2AServerConfig   A2AServerConfig                `json:"a2a_settings"`
 }
@@ -139,12 +144,12 @@ func CreateStandardConfigFile(configPath string) (*CleverChattyConfig, error) {
 		ServerConfig: ServerConfig{
 			SessionTimeout: defaultSessionTimeout,
 		},
-		LogFilePath:    "cleverchatty.log",
-		DebugMode:      false,
-		MessageWindow:  10,
-		Model:          "",
-		MCPConnections: make(map[string]ServerConfigWrapper),
-		RAGConfig:      RAGConfig{ContextPrefix: "Context:"},
+		LogFilePath:   "cleverchatty.log",
+		DebugMode:     false,
+		MessageWindow: 10,
+		Model:         "",
+		ToolsServers:  make(map[string]ServerConfigWrapper),
+		RAGConfig:     RAGConfig{ContextPrefix: "Context:"},
 	}
 
 	configData, err := json.MarshalIndent(defaultConfig, "", "  ")
@@ -193,6 +198,7 @@ func LoadConfig(configPath string) (*CleverChattyConfig, error) {
 func (w *ServerConfigWrapper) UnmarshalJSON(data []byte) error {
 	var typeField struct {
 		Url       string `json:"url"`
+		Endpoint  string `json:"endpoint"`
 		Transport string `json:"transport"`
 		Interface string `json:"interface"`
 		Disabled  bool   `json:"disabled"`
@@ -209,22 +215,29 @@ func (w *ServerConfigWrapper) UnmarshalJSON(data []byte) error {
 	if typeField.Url != "" {
 		if typeField.Transport == transportSSE {
 			// If the URL field is present, treat it as an SSE server
-			var sse SSEServerConfig
+			var sse SSEMCPServerConfig
 			if err := json.Unmarshal(data, &sse); err != nil {
 				return err
 			}
 			w.Config = sse
 		} else {
 			// Otherwise, treat it as an HTTP streaming server
-			var httpStreaming HTTPStreamingServerConfig
+			var httpStreaming HTTPStreamingMCPServerConfig
 			if err := json.Unmarshal(data, &httpStreaming); err != nil {
 				return err
 			}
 			w.Config = httpStreaming
 		}
+	} else if typeField.Endpoint != "" {
+		// If the Endpoint field is present, treat it as an A2A server
+		var a2a A2AToolsServerConfig
+		if err := json.Unmarshal(data, &a2a); err != nil {
+			return err
+		}
+		w.Config = a2a
 	} else {
 		// Otherwise, treat it as a STDIOServerConfig
-		var stdio STDIOServerConfig
+		var stdio STDIOMCPServerConfig
 		if err := json.Unmarshal(data, &stdio); err != nil {
 			return err
 		}
@@ -238,11 +251,21 @@ func (w ServerConfigWrapper) MarshalJSON() ([]byte, error) {
 }
 
 func (w ServerConfigWrapper) isMemoryServer() bool {
-	return w.Interface == mcpServerInterfaceMemory
+	return w.Interface == toolsServerInterfaceMemory
 }
 
 func (w ServerConfigWrapper) isRAGServer() bool {
-	return w.Interface == mcpServerInterfaceRAG
+	return w.Interface == toolsServerInterfaceRAG
+}
+
+func (w ServerConfigWrapper) isMCPServer() bool {
+	return w.Config.GetType() == transportSSE ||
+		w.Config.GetType() == transportHTTPStreaming ||
+		w.Config.GetType() == transportStdio
+}
+
+func (w ServerConfigWrapper) isA2AServer() bool {
+	return w.Config.GetType() == transportA2A
 }
 
 func InitLogger(logFilePath string, debugMMode bool) (*log.Logger, error) {

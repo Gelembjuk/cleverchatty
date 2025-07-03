@@ -9,8 +9,8 @@ import (
 
 func TestObjectCreate(t *testing.T) {
 	cleverChattyObj, err := GetCleverChatty(CleverChattyConfig{
-		Model:          "mock:mock",
-		MCPConnections: map[string]ServerConfigWrapper{},
+		Model:        "mock:mock",
+		ToolsServers: map[string]ServerConfigWrapper{},
 	}, nil)
 
 	if err != nil {
@@ -22,7 +22,7 @@ func TestObjectCreate(t *testing.T) {
 	if cleverChattyObj.provider == nil {
 		t.Fatal("Provider is nil")
 	}
-	if cleverChattyObj.mcpHost == nil {
+	if cleverChattyObj.toolsHost == nil {
 		t.Fatal("MCPHost is nil")
 	}
 	if cleverChattyObj.logger == nil {
@@ -33,7 +33,7 @@ func TestObjectCreate(t *testing.T) {
 func TestObjectWithOneServerCreate(t *testing.T) {
 	cleverChattyObj, err := GetCleverChatty(CleverChattyConfig{
 		Model: "mock:mock",
-		MCPConnections: map[string]ServerConfigWrapper{
+		ToolsServers: map[string]ServerConfigWrapper{
 			"test": {
 				Config: InternalServerConfig{
 					Kind: "mock",
@@ -51,34 +51,34 @@ func TestObjectWithOneServerCreate(t *testing.T) {
 	if cleverChattyObj.provider == nil {
 		t.Fatal("Provider is nil")
 	}
-	if cleverChattyObj.mcpHost == nil {
+	if cleverChattyObj.toolsHost == nil {
 		t.Fatal("MCPHost is nil")
 	}
 	if cleverChattyObj.logger == nil {
 		t.Fatal("Logger is nil")
 	}
-	if len(cleverChattyObj.mcpHost.config) != 1 {
-		t.Fatalf("Expected 1 server, got %d", len(cleverChattyObj.mcpHost.config))
+	if len(cleverChattyObj.toolsHost.config) != 1 {
+		t.Fatalf("Expected 1 server, got %d", len(cleverChattyObj.toolsHost.config))
 	}
-	if _, ok := cleverChattyObj.mcpHost.config["test"]; !ok {
+	if _, ok := cleverChattyObj.toolsHost.config["test"]; !ok {
 		t.Fatalf("Expected server 'test' not found in config")
 	}
-	if _, ok := cleverChattyObj.mcpHost.clients["test"]; !ok {
+	if _, ok := cleverChattyObj.toolsHost.mcpClients["test"]; !ok {
 		t.Fatalf("Expected client for server 'test' not found in clients")
 	}
-	if _, ok := cleverChattyObj.mcpHost.clients["test"].(*test.MockMCPClient); !ok {
+	if _, ok := cleverChattyObj.toolsHost.mcpClients["test"].(*test.MockMCPClient); !ok {
 		t.Fatalf("Expected client for server 'test' to be of type MockMCPClient")
 	}
-	if len(cleverChattyObj.mcpHost.clients) != 1 {
-		t.Fatalf("Expected 1 client, got %d", len(cleverChattyObj.mcpHost.clients))
+	if len(cleverChattyObj.toolsHost.mcpClients) != 1 {
+		t.Fatalf("Expected 1 client, got %d", len(cleverChattyObj.toolsHost.mcpClients))
 	}
-	if cleverChattyObj.mcpHost.tools == nil {
+	if cleverChattyObj.toolsHost.tools == nil {
 		t.Fatal("Tools are nil")
 	}
-	if len(cleverChattyObj.mcpHost.tools) != 1 {
-		t.Fatalf("Expected 1 tools, got %d", len(cleverChattyObj.mcpHost.tools))
+	if len(cleverChattyObj.toolsHost.tools) != 1 {
+		t.Fatalf("Expected 1 tools, got %d", len(cleverChattyObj.toolsHost.tools))
 	}
-	if cleverChattyObj.mcpHost.tools[0].Name != "test__tool1" {
-		t.Fatalf("Expected tool name 'tool1', got '%s'", cleverChattyObj.mcpHost.tools[0].Name)
+	if cleverChattyObj.toolsHost.tools[0].Name != "test__tool1" {
+		t.Fatalf("Expected tool name 'tool1', got '%s'", cleverChattyObj.toolsHost.tools[0].Name)
 	}
 }

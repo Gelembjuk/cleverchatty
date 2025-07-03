@@ -155,7 +155,13 @@ func handleServersCommand(cleverChattyObject cleverchatty.CleverChatty) {
 			for _, server := range servers {
 				markdown.WriteString(fmt.Sprintf("# %s\n\n", server.Name))
 
-				if server.IsSSE() {
+				if server.IsMCPSSEServer() || server.IsMCPHTTPStreamingServer() {
+					markdown.WriteString("*Transport*\n")
+					if server.IsMCPHTTPStreamingServer() {
+						markdown.WriteString("HTTP Streaming\n\n")
+					} else {
+						markdown.WriteString("SSE\n\n")
+					}
 					markdown.WriteString("*Url*\n")
 					markdown.WriteString(fmt.Sprintf("`%s`\n\n", server.Url))
 					markdown.WriteString("*headers*\n")
@@ -170,7 +176,11 @@ func handleServersCommand(cleverChattyObject cleverchatty.CleverChatty) {
 					} else {
 						markdown.WriteString("*None*\n")
 					}
-
+				} else if server.IsA2AServer() {
+					markdown.WriteString("*Transport*\n")
+					markdown.WriteString("A2A\n\n")
+					markdown.WriteString("*Endpoint*\n")
+					markdown.WriteString(fmt.Sprintf("`%s`\n\n", server.Endpoint))
 				} else {
 					markdown.WriteString("*Command*\n")
 					markdown.WriteString(fmt.Sprintf("`%s`\n\n", server.Command))

@@ -26,6 +26,28 @@ type HistoryMessage struct {
 	Content []ContentBlock `json:"content"`
 }
 
+// ContentBlock represents a block of content in a message
+type ContentBlock struct {
+	Type      string          `json:"type"`
+	Text      string          `json:"text,omitempty"`
+	ID        string          `json:"id,omitempty"`
+	ToolUseID string          `json:"tool_use_id,omitempty"`
+	Name      string          `json:"name,omitempty"`
+	Input     json.RawMessage `json:"input,omitempty"`
+	Content   interface{}     `json:"content,omitempty"`
+}
+
+type Content interface {
+	isContent()
+}
+
+type TextContent struct {
+	Type string
+	Text string
+}
+
+func (TextContent) isContent() {}
+
 func NewMemoryNoteMessage(content string) HistoryMessage {
 	return HistoryMessage{
 		Role:    messageRoleSystem,
@@ -74,6 +96,15 @@ func NewSystemInstructionMessage(instruction string) HistoryMessage {
 				Type: "text",
 				Text: instruction,
 			},
+		},
+	}
+}
+
+func NewTextContent(content string) []Content {
+	return []Content{
+		TextContent{
+			Type: "text",
+			Text: content,
 		},
 	}
 }
@@ -184,15 +215,4 @@ func (t *HistoryToolCall) GetArguments() map[string]interface{} {
 		return make(map[string]interface{})
 	}
 	return args
-}
-
-// ContentBlock represents a block of content in a message
-type ContentBlock struct {
-	Type      string          `json:"type"`
-	Text      string          `json:"text,omitempty"`
-	ID        string          `json:"id,omitempty"`
-	ToolUseID string          `json:"tool_use_id,omitempty"`
-	Name      string          `json:"name,omitempty"`
-	Input     json.RawMessage `json:"input,omitempty"`
-	Content   interface{}     `json:"content,omitempty"`
 }

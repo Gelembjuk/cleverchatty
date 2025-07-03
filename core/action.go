@@ -9,7 +9,6 @@ import (
 
 	"github.com/gelembjuk/cleverchatty/core/history"
 	"github.com/gelembjuk/cleverchatty/core/llm"
-	"github.com/mark3labs/mcp-go/mcp"
 )
 
 func (assistant *CleverChatty) pruneMessages() {
@@ -71,7 +70,7 @@ func (assistant *CleverChatty) pruneMessages() {
 
 func (assistant *CleverChatty) addToMemory(role string, content string) {
 	// TODO. Add timeouts to context
-	assistant.mcpHost.Remember(role, history.ContentBlock{
+	assistant.toolsHost.Remember(role, history.ContentBlock{
 		Type: "text",
 		Text: content,
 	}, context.Background())
@@ -82,7 +81,7 @@ func (assistant *CleverChatty) injectMemories(prompt string) {
 	// TODO. Add timeouts to context
 	assistant.Callbacks.CallMemoryRetrievalStarted()
 
-	memories, _ := assistant.mcpHost.Recall(context.Background(), prompt)
+	memories, _ := assistant.toolsHost.Recall(context.Background(), prompt)
 
 	if memories == "" {
 		return // no memories to inject
@@ -104,7 +103,7 @@ func (assistant *CleverChatty) injectMemories(prompt string) {
 
 func (assistant *CleverChatty) injectRAGContext(prompt string) {
 	// get RAG context if there are any
-	if !assistant.mcpHost.HasRagServer() {
+	if !assistant.toolsHost.HasRagServer() {
 		// no RAG context configured, nothing to inject
 		return
 	}
@@ -121,7 +120,7 @@ func (assistant *CleverChatty) injectRAGContext(prompt string) {
 			assistant.context,
 			prompt,
 			[]llm.Message{&instructionMessage},
-			assistant.mcpHost.tools,
+			assistant.toolsHost.tools,
 		)
 		if err == nil {
 			// if we got a response, use it as the prompt for RAG context
@@ -132,7 +131,7 @@ func (assistant *CleverChatty) injectRAGContext(prompt string) {
 		}
 	}
 	// TODO. Add timeouts to context
-	ragDocuments, err := assistant.mcpHost.GetRAGContext(context.Background(), prompt)
+	ragDocuments, err := assistant.toolsHost.GetRAGContext(context.Background(), prompt)
 
 	if err != nil {
 		assistant.logger.Printf("Error getting RAG context: %v\n", err)
@@ -216,7 +215,7 @@ func (assistant *CleverChatty) processPrompt(prompt string) (string, error) {
 				assistant.context,
 				prompt,
 				llmMessages,
-				assistant.mcpHost.tools,
+				assistant.toolsHost.tools,
 			)
 			resultCh <- result{message: msg, err: err}
 		}()
@@ -300,62 +299,46 @@ func (assistant *CleverChatty) processPrompt(prompt string) (string, error) {
 
 		serverName, toolName := parts[0], parts[1]
 
-		toolResultPtr, err := assistant.mcpHost.callTool(
+		toolResult := assistant.toolsHost.callTool(
 			serverName,
 			toolName,
 			toolCall.GetArguments(),
 			assistant.context,
 		)
 
-		if err != nil {
+		if toolResult.Error != nil {
 			errMsg := fmt.Sprintf(
 				"Error calling tool %s: %v",
 				toolCall.GetName(),
-				err,
+				toolResult.Error,
 			)
-			assistant.Callbacks.CallToolCallFailed(toolCall.GetName(), err)
+			assistant.Callbacks.CallToolCallFailed(toolCall.GetName(), toolResult.Error)
 
 			// Add error message as tool result
 			toolResults = append(toolResults, history.ContentBlock{
 				Type:      "tool_result",
+				Text:      errMsg,
 				ToolUseID: toolCall.GetID(),
-				Content: []history.ContentBlock{{
-					Type: "text",
-					Text: errMsg,
-				}},
+				Content:   history.NewTextContent(errMsg),
 			})
 			continue
 		}
 
-		toolResult := *toolResultPtr
-
-		if toolResult.Content != nil {
-			// Create the tool result block
-			resultBlock := history.ContentBlock{
-				Type:      "tool_result",
-				ToolUseID: toolCall.GetID(),
-				Content:   toolResult.Content,
-			}
-
-			// Extract text content
-			var resultText string
-			// Handle array content directly since we know it's []interface{}
-			for _, item := range toolResult.Content {
-				if contentMap, ok := item.(mcp.TextContent); ok {
-					resultText += fmt.Sprintf("%v ", contentMap.Text)
-				}
-			}
-
-			resultBlock.Text = strings.TrimSpace(resultText)
-
-			if assistant.config.DebugMode {
-				assistant.logger.Printf("created tool result block. %s, %s\n",
-					resultBlock,
-					toolCall.GetID())
-			}
-
-			toolResults = append(toolResults, resultBlock)
+		// Create the tool result block
+		resultBlock := history.ContentBlock{
+			Type:      "tool_result",
+			Text:      toolResult.getTextContent(),
+			ToolUseID: toolCall.GetID(),
+			Content:   toolResult.Content,
 		}
+
+		if assistant.config.DebugMode {
+			assistant.logger.Printf("created tool result block. %s, %s\n",
+				resultBlock,
+				toolCall.GetID())
+		}
+
+		toolResults = append(toolResults, resultBlock)
 	}
 	assistant.messages = append(assistant.messages, history.HistoryMessage{
 		Role:    message.GetRole(),

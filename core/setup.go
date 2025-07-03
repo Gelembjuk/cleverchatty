@@ -20,7 +20,7 @@ type CleverChatty struct {
 	config    CleverChattyConfig
 	logger    *log.Logger
 	provider  llm.Provider
-	mcpHost   *MCPHost
+	toolsHost *ToolsHost
 	messages  []history.HistoryMessage
 	Callbacks UICallbacks
 }
@@ -57,7 +57,7 @@ func GetCleverChattyWithLogger(config CleverChattyConfig, ctx context.Context, l
 		return nil, fmt.Errorf("error creating provider: %v", err)
 	}
 
-	assistant.mcpHost, err = newMCPHost(config.MCPConnections, logger, ctx)
+	assistant.toolsHost, err = newToolsHost(config.ToolsServers, logger, ctx)
 
 	if err != nil {
 		return nil, fmt.Errorf("error creating MCP host: %v", err)
@@ -125,7 +125,7 @@ func (assistant CleverChatty) createProvider(ctx context.Context, modelString st
 }
 
 func (assistant *CleverChatty) Finish() error {
-	err := assistant.mcpHost.Close()
+	err := assistant.toolsHost.Close()
 	if err != nil {
 		return fmt.Errorf(
 			"error closing client %v",
@@ -138,11 +138,11 @@ func (assistant *CleverChatty) Finish() error {
 }
 
 func (assistant *CleverChatty) GetServersInfo() []ServerInfo {
-	return assistant.mcpHost.getServersInfo()
+	return assistant.toolsHost.getServersInfo()
 }
 
 func (assistant *CleverChatty) GetToolsInfo() []ServerInfo {
-	return assistant.mcpHost.getToolsInfo()
+	return assistant.toolsHost.getToolsInfo()
 }
 
 func (assistant *CleverChatty) GetMessages() []history.HistoryMessage {

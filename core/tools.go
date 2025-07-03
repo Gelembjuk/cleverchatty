@@ -21,13 +21,19 @@ const (
 	ragToolName            = "knowledge_search"
 )
 
-type MCPHost struct {
+type ToolsHost struct {
 	config           map[string]ServerConfigWrapper
 	logger           *log.Logger
-	clients          map[string]mcpclient.MCPClient
+	mcpClients       map[string]mcpclient.MCPClient
+	a2aClients       map[string]A2AAgent
 	tools            []llm.Tool
 	memoryServerName string
 	ragServerName    string
+}
+
+type ToolCallResult struct {
+	Content []history.Content
+	Error   error
 }
 
 type ServerToolInfo struct {
@@ -41,6 +47,7 @@ type ServerInfo struct {
 	Transport string
 	Command   string
 	Url       string
+	Endpoint  string
 	Headers   []string
 	Args      []string
 	Env       map[string]string
@@ -53,24 +60,64 @@ func (si ServerInfo) GetType() string {
 		return transportStdio
 	case transportSSE:
 		return transportSSE
+	case transportHTTPStreaming:
+		return transportHTTPStreaming
+	case transportA2A:
+		return transportA2A
 	default:
 		return "unknown"
 	}
 }
 
-func (si ServerInfo) IsSSE() bool {
-	return si.Transport == transportSSE
+func (si ServerInfo) IsMCP() bool {
+	return si.Transport == transportSSE ||
+		si.Transport == transportHTTPStreaming ||
+		si.Transport == transportStdio
 }
-func (si ServerInfo) IsStdio() bool {
-	return si.Transport == transportStdio
+func (si ServerInfo) IsA2A() bool {
+	return si.Transport == transportA2A
 }
 
-func newMCPHost(
+func (si ServerInfo) IsMCPSSEServer() bool {
+	return si.Transport == transportSSE
+}
+func (si ServerInfo) IsMCPStdioServer() bool {
+	return si.Transport == transportStdio
+}
+func (si ServerInfo) IsMCPHTTPStreamingServer() bool {
+	return si.Transport == transportHTTPStreaming
+}
+func (si ServerInfo) IsA2AServer() bool {
+	return si.Transport == transportA2A
+}
+
+func (tc ToolCallResult) getTextContent() string {
+	var textContent strings.Builder
+	for _, content := range tc.Content {
+		if textC, ok := content.(history.TextContent); ok {
+			textContent.WriteString(textC.Text)
+		}
+	}
+	return strings.TrimSpace(textContent.String())
+}
+
+func (tc *ToolCallResult) validateNotEmpty() {
+	if tc.Content == nil {
+		tc.Error = fmt.Errorf("no content from tool call")
+		return
+	}
+	if len(tc.Content) == 0 {
+		tc.Error = fmt.Errorf("no content from tool call")
+		return
+	}
+}
+
+func newToolsHost(
 	mcpServersConfig map[string]ServerConfigWrapper,
 	logger *log.Logger,
 	ctx context.Context,
-) (*MCPHost, error) {
-	host := &MCPHost{
+) (*ToolsHost, error) {
+	host := &ToolsHost{
 		config: mcpServersConfig,
 		logger: logger,
 	}
@@ -81,16 +128,38 @@ func newMCPHost(
 		return nil, fmt.Errorf("failed to create MCP clients: %w", err)
 	}
 
+	err = host.createA2AClients()
+	if err != nil {
+		return nil, fmt.Errorf("failed to create A2A clients: %w", err)
+	}
+
+	host.tools = []llm.Tool{}
+
 	err = host.loadMCPTools(ctx)
 	if err != nil {
 		host.Close()
 		return nil, fmt.Errorf("failed to load MCP tools: %w", err)
 	}
 
+	err = host.loadA2ATools(ctx)
+	if err != nil {
+		host.Close()
+		return nil, fmt.Errorf("failed to load A2A tools: %w", err)
+	}
+
 	return host, nil
 }
 
-func (host MCPHost) mcpToolsToAnthropicTools(
+func (host ToolsHost) isMCPServer(serverName string) bool {
+	_, ok := host.mcpClients[serverName]
+	return ok
+}
+func (host ToolsHost) isA2AServer(serverName string) bool {
+	_, ok := host.a2aClients[serverName]
+	return ok
+}
+
+func (host ToolsHost) mcpToolsToAnthropicTools(
 	serverName string,
 	mcpTools []mcp.Tool,
 ) []llm.Tool {
@@ -114,7 +183,7 @@ func (host MCPHost) mcpToolsToAnthropicTools(
 }
 
 // Create MCP servers instances
-func (host *MCPHost) createMCPClients() error {
+func (host *ToolsHost) createMCPClients() error {
 	clients := make(map[string]mcpclient.MCPClient)
 
 	for name, server := range host.config {
@@ -123,11 +192,15 @@ func (host *MCPHost) createMCPClients() error {
 			continue
 		}
 
+		if !server.isMCPServer() {
+			continue
+		}
+
 		var client mcpclient.MCPClient
 		var err error
 
 		if server.Config.GetType() == transportSSE {
-			sseConfig := server.Config.(SSEServerConfig)
+			sseConfig := server.Config.(SSEMCPServerConfig)
 
 			options := []transport.ClientOption{}
 
@@ -150,7 +223,7 @@ func (host *MCPHost) createMCPClients() error {
 				options...,
 			)
 		} else if server.Config.GetType() == transportHTTPStreaming {
-			httpConfig := server.Config.(HTTPStreamingServerConfig)
+			httpConfig := server.Config.(HTTPStreamingMCPServerConfig)
 
 			options := []transport.StreamableHTTPCOption{}
 
@@ -177,7 +250,7 @@ func (host *MCPHost) createMCPClients() error {
 
 			err = fmt.Errorf("unknown internal server kind: %s", internalConfig.Kind)
 		} else {
-			stdioConfig := server.Config.(STDIOServerConfig)
+			stdioConfig := server.Config.(STDIOMCPServerConfig)
 			var env []string
 			for k, v := range stdioConfig.Env {
 				env = append(env, fmt.Sprintf("%s=%s", k, v))
@@ -240,18 +313,57 @@ func (host *MCPHost) createMCPClients() error {
 		host.logger.Printf("Server connected %s\n", name)
 	}
 
-	host.clients = clients
+	host.mcpClients = clients
+
+	return nil
+}
+
+func (host *ToolsHost) createA2AClients() error {
+	clients := make(map[string]A2AAgent)
+
+	for name, server := range host.config {
+
+		if server.Disabled {
+			continue
+		}
+
+		if !server.isA2AServer() {
+			continue
+		}
+
+		config := server.Config.(A2AToolsServerConfig)
+
+		agent, err := NewA2AAgent(config.Endpoint, host.logger)
+		if err != nil {
+			return fmt.Errorf("failed to fetch agent card for %s: %w", name, err)
+		}
+
+		clients[name] = *agent
+
+		if server.isMemoryServer() {
+			host.memoryServerName = name
+			host.logger.Printf("Memory server connected %s\n", name)
+		}
+		if server.isRAGServer() {
+			host.ragServerName = name
+			host.logger.Printf("RAG server connected %s\n", name)
+		}
+
+		host.logger.Printf("Server connected %s\n", name)
+	}
+
+	host.a2aClients = clients
 
 	return nil
 }
 
 // Check if the host has a RAG server connected
-func (host MCPHost) HasRagServer() bool {
+func (host ToolsHost) HasRagServer() bool {
 	return host.ragServerName != ""
 }
-func (host *MCPHost) Close() error {
+func (host *ToolsHost) Close() error {
 	errors := []error{}
-	for _, client := range host.clients {
+	for _, client := range host.mcpClients {
 		err := client.Close()
 
 		if err != nil {
@@ -264,9 +376,9 @@ func (host *MCPHost) Close() error {
 	}
 	return nil
 }
-func (host *MCPHost) loadMCPTools(ctx context.Context) error {
+func (host *ToolsHost) loadMCPTools(ctx context.Context) error {
 	var allTools []llm.Tool
-	for serverName, mcpClient := range host.clients {
+	for serverName, mcpClient := range host.mcpClients {
 		config, ok := host.config[serverName]
 
 		if !ok {
@@ -302,6 +414,7 @@ func (host *MCPHost) loadMCPTools(ctx context.Context) error {
 					continue
 				}
 			}
+			host.logger.Printf("Tool %s loaded from server %s\n", tool.Name, serverName)
 			filteredTools = append(filteredTools, tool)
 		}
 
@@ -314,22 +427,89 @@ func (host *MCPHost) loadMCPTools(ctx context.Context) error {
 			len(filteredTools),
 		)
 	}
-	host.tools = allTools
+	host.tools = append(host.tools, allTools...)
 	return nil
 }
 
-func (host MCPHost) callTool(serverName string, toolName string, toolArgs map[string]interface{}, ctx context.Context) (*mcp.CallToolResult, error) {
-	mcpClient, ok := host.clients[serverName]
+func (host *ToolsHost) loadA2ATools(ctx context.Context) error {
+	var allTools []llm.Tool
+	for serverName, a2aClient := range host.a2aClients {
+		config, ok := host.config[serverName]
+
+		if !ok {
+			host.logger.Printf("Server %s not found in config\n", serverName)
+			continue
+		}
+
+		serverTools := []llm.Tool{}
+
+		for _, a2aSkill := range a2aClient.Card.Skills {
+			if config.isMemoryServer() {
+				// Ignore memory-related tools
+				if a2aSkill.ID == memoryToolRememberName ||
+					a2aSkill.ID == memoryToolRecallName {
+					continue
+				}
+			}
+			if config.isRAGServer() {
+				// Ignore RAG-related tools
+				if a2aSkill.ID == ragToolName {
+					continue
+				}
+			}
+			tool := llm.Tool{
+				Name:        fmt.Sprintf("%s__%s", serverName, a2aSkill.ID),
+				Description: a2aSkill.Name + "\n" + a2aSkill.Description,
+				InputSchema: llm.Schema{
+					Type: "object",
+					Properties: map[string]any{
+						"message": map[string]any{
+							"description": a2aSkill.Name + ". " + a2aSkill.Description,
+						},
+					},
+				},
+			}
+			serverTools = append(serverTools, tool)
+		}
+
+		allTools = append(allTools, serverTools...)
+
+		host.logger.Printf(
+			"Tools loaded from server %s: %d tools\n",
+			serverName,
+			len(serverTools),
+		)
+	}
+	host.tools = append(host.tools, allTools...)
+	return nil
+}
+
+func (host ToolsHost) callTool(serverName string, toolName string, toolArgs map[string]interface{}, ctx context.Context) ToolCallResult {
+	if host.isMCPServer(serverName) {
+		return host.callMCPTool(serverName, toolName, toolArgs, ctx)
+	}
+	if host.isA2AServer(serverName) {
+		if agentCard, ok := host.a2aClients[serverName]; ok {
+			return agentCard.sendMessage(toolName, toolArgs, ctx)
+		}
+		return ToolCallResult{
+			Error: fmt.Errorf("A2A server %s not found", serverName),
+		}
+	}
+	return ToolCallResult{
+		Error: fmt.Errorf("server %s is not a valid MCP or A2A server", serverName),
+	}
+}
+
+func (host ToolsHost) callMCPTool(serverName string, toolName string, toolArgs map[string]interface{}, ctx context.Context) ToolCallResult {
+	mcpClient, ok := host.mcpClients[serverName]
 	if !ok {
-		return nil, fmt.Errorf("server not found: %s", serverName)
+		return ToolCallResult{
+			Error: fmt.Errorf("server %s not found", serverName),
+		}
 	}
 
-	type result struct {
-		toolResultPtr *mcp.CallToolResult
-		err           error
-	}
-
-	resultCh := make(chan result, 1)
+	resultCh := make(chan ToolCallResult, 1)
 
 	go func() {
 
@@ -351,26 +531,53 @@ func (host MCPHost) callTool(serverName string, toolName string, toolArgs map[st
 			toolName,
 			serverName,
 		)
-		resultCh <- result{toolResultPtr: toolResultPtr, err: err}
+		result := ToolCallResult{
+			Content: []history.Content{},
+			Error:   err,
+		}
+		if err == nil {
+			toolResult := *toolResultPtr
+
+			if toolResult.Content != nil {
+				for _, content := range toolResult.Content {
+					switch content := content.(type) {
+					case mcp.TextContent:
+						// Convert mcp.TextContent to history.TextContent
+						result.Content = append(result.Content, history.TextContent{
+							Type: "text",
+							Text: content.Text,
+						})
+					case mcp.ImageContent:
+						// Convert mcp.ImageContent to history.ImageContent
+						// TODO: handle image content
+					default:
+					}
+				}
+			}
+			result.validateNotEmpty()
+		}
+		resultCh <- result
 
 	}()
 
 	select {
 	case res := <-resultCh:
 		// done!
-		return res.toolResultPtr, res.err
+		return res
 	case <-ctx.Done():
 		// context cancelled or timed out
-		return nil, ctx.Err()
+		return ToolCallResult{
+			Error: ctx.Err(),
+		}
 	}
 }
 
-func (host MCPHost) getServersInfo() []ServerInfo {
+func (host ToolsHost) getServersInfo() []ServerInfo {
 	var servers []ServerInfo
 	for name, server := range host.config {
 		switch server.Config.(type) {
-		case STDIOServerConfig:
-			stdioServer := server.Config.(STDIOServerConfig)
+		case STDIOMCPServerConfig:
+			stdioServer := server.Config.(STDIOMCPServerConfig)
 			servers = append(servers, ServerInfo{
 				Name:      name,
 				Transport: transportStdio,
@@ -378,13 +585,36 @@ func (host MCPHost) getServersInfo() []ServerInfo {
 				Args:      stdioServer.Args,
 				Env:       stdioServer.Env,
 			})
-		case SSEServerConfig:
-			sseServer := server.Config.(SSEServerConfig)
+		case SSEMCPServerConfig:
+			sseServer := server.Config.(SSEMCPServerConfig)
 			servers = append(servers, ServerInfo{
 				Name:      name,
 				Transport: transportSSE,
 				Url:       sseServer.Url,
 				Headers:   sseServer.Headers,
+			})
+		case HTTPStreamingMCPServerConfig:
+			httpServer := server.Config.(HTTPStreamingMCPServerConfig)
+			servers = append(servers, ServerInfo{
+				Name:      name,
+				Transport: transportHTTPStreaming,
+				Url:       httpServer.Url,
+				Headers:   httpServer.Headers,
+			})
+		case A2AToolsServerConfig:
+			a2aServer := server.Config.(A2AToolsServerConfig)
+			servers = append(servers, ServerInfo{
+				Name:      name,
+				Transport: transportA2A,
+				Endpoint:  a2aServer.Endpoint,
+				Headers:   a2aServer.Headers,
+			})
+		case InternalServerConfig:
+			internalServer := server.Config.(InternalServerConfig)
+			servers = append(servers, ServerInfo{
+				Name:      name,
+				Transport: transportInternal,
+				Command:   internalServer.Kind,
 			})
 		default:
 			host.logger.Printf("Unknown server type %T", server)
@@ -393,11 +623,12 @@ func (host MCPHost) getServersInfo() []ServerInfo {
 	return servers
 }
 
-func (host MCPHost) getToolsInfo() []ServerInfo {
+func (host ToolsHost) getToolsInfo() []ServerInfo {
 	servers := host.getServersInfo()
 	for i, server := range servers {
+		var toolsResult *mcp.ListToolsResult
 
-		mcpClient := host.clients[server.Name]
+		mcpClient := host.mcpClients[server.Name]
 		ctx, cancel := context.WithTimeout(
 			context.Background(),
 			10*time.Second,
@@ -432,7 +663,7 @@ func (host MCPHost) getToolsInfo() []ServerInfo {
 
 // if there is a memory MCP server, then it should be used. Send the messages to it
 // this is async, so the messages are not sent immediately
-func (host MCPHost) Remember(role string, content history.ContentBlock, ctx context.Context) {
+func (host ToolsHost) Remember(role string, content history.ContentBlock, ctx context.Context) {
 	if host.memoryServerName == "" {
 		return
 	}
@@ -445,7 +676,7 @@ func (host MCPHost) Remember(role string, content history.ContentBlock, ctx cont
 		content.Text,
 	)
 	// call the memory server to remember the messages
-	_, err := host.callTool(
+	res := host.callTool(
 		host.memoryServerName,
 		memoryToolRememberName,
 		map[string]interface{}{
@@ -454,23 +685,23 @@ func (host MCPHost) Remember(role string, content history.ContentBlock, ctx cont
 		},
 		ctx,
 	)
-	if err != nil {
+	if res.Error != nil {
 		host.logger.Printf(
 			"Error remembering message: %v\n",
-			err,
+			res.Error,
 		)
 		return
 	}
 }
 
 // requests the memory server to recall the messages
-func (host MCPHost) Recall(ctx context.Context, prompt string) (string, error) {
+func (host ToolsHost) Recall(ctx context.Context, prompt string) (string, error) {
 	if host.memoryServerName == "" {
 		return "", nil
 	}
 
 	// call the memory server to recall the messages
-	toolResultPtr, err := host.callTool(
+	res := host.callTool(
 		host.memoryServerName,
 		memoryToolRecallName,
 		map[string]interface{}{
@@ -478,42 +709,31 @@ func (host MCPHost) Recall(ctx context.Context, prompt string) (string, error) {
 		},
 		ctx,
 	)
-	if err != nil {
+	if res.Error != nil {
 		host.logger.Printf(
 			"Error recalling messages: %v\n",
-			err,
+			res.Error,
 		)
-		return "", err
+		return "", res.Error
 	}
-	if toolResultPtr == nil {
-		return "", fmt.Errorf("no result from memory server")
-	}
-	if toolResultPtr.Content == nil {
-		return "", fmt.Errorf("no content from memory server")
-	}
-	var resultText string
-	for _, item := range toolResultPtr.Content {
-		if contentMap, ok := item.(mcp.TextContent); ok {
-			resultText += fmt.Sprintf("%v ", contentMap.Text)
-		}
-	}
-	resultText = strings.TrimSpace(resultText)
+
+	resultText := res.getTextContent()
 
 	if resultText == "none" {
 		return "", nil
 	}
 
-	return strings.TrimSpace(resultText), nil
+	return resultText, nil
 }
 
 // requests the memory server to recall the messages
-func (host MCPHost) GetRAGContext(ctx context.Context, prompt string) ([]string, error) {
+func (host ToolsHost) GetRAGContext(ctx context.Context, prompt string) ([]string, error) {
 	if host.ragServerName == "" {
 		return []string{}, nil
 	}
 
 	// call the memory server to recall the messages
-	toolResultPtr, err := host.callTool(
+	res := host.callTool(
 		host.ragServerName,
 		ragToolName,
 		map[string]interface{}{
@@ -522,26 +742,14 @@ func (host MCPHost) GetRAGContext(ctx context.Context, prompt string) ([]string,
 		},
 		ctx,
 	)
-	if err != nil {
+	if res.Error != nil {
 		host.logger.Printf(
 			"Error calling RAG server: %v\n",
-			err,
+			res.Error,
 		)
-		return []string{}, err
+		return []string{}, res.Error
 	}
-	if toolResultPtr == nil {
-		return []string{}, fmt.Errorf("no result from memory server")
-	}
-	if toolResultPtr.Content == nil {
-		return []string{}, fmt.Errorf("no content from memory server")
-	}
-	var resultText string
-	for _, item := range toolResultPtr.Content {
-		if contentMap, ok := item.(mcp.TextContent); ok {
-			resultText += fmt.Sprintf("%v ", contentMap.Text)
-		}
-	}
-	resultText = strings.TrimSpace(resultText)
+	resultText := res.getTextContent()
 
 	if resultText == "none" {
 		return []string{}, nil

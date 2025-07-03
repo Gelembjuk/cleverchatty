@@ -7,8 +7,8 @@ import (
 
 func TestBasicChat(t *testing.T) {
 	cleverChattyObj, err := GetCleverChatty(CleverChattyConfig{
-		Model:          "mock:mock",
-		MCPConnections: map[string]ServerConfigWrapper{},
+		Model:        "mock:mock",
+		ToolsServers: map[string]ServerConfigWrapper{},
 	}, context.Background())
 
 	if err != nil {
@@ -36,7 +36,7 @@ func TestBasicChat(t *testing.T) {
 func TestChatWithTool(t *testing.T) {
 	cleverChattyObj, err := GetCleverChatty(CleverChattyConfig{
 		Model: "mock:mock",
-		MCPConnections: map[string]ServerConfigWrapper{
+		ToolsServers: map[string]ServerConfigWrapper{
 			"test": {
 				Config: InternalServerConfig{
 					Kind: "mock",
