@@ -36,11 +36,11 @@ type AgentCard struct {
 }
 
 type Provider struct {
-	Organization string `json:"organization"`
+	Organization string `json:"organization,omitempty"`
 }
 
 type Capabilities struct {
-	Streaming bool `json:"streaming"`
+	Streaming bool `json:"streaming,omitempty"`
 }
 
 type Skill struct {
@@ -89,10 +89,6 @@ func NewA2AAgent(endpoint string, logger *log.Logger) (*A2AAgent, error) {
 
 	if card.Name == "" {
 		return nil, fmt.Errorf("agent card name is empty")
-	}
-
-	if card.Provider.Organization == "" {
-		return nil, fmt.Errorf("agent card provider organization is empty")
 	}
 
 	a2aAgent := &A2AAgent{

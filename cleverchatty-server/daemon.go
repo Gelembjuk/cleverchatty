@@ -265,16 +265,22 @@ func loadConfigAndLogger() (config *cleverchatty.CleverChattyConfig, logger *log
 	if err != nil {
 		return
 	}
-
-	// confirm there is at least one server to run
-	if config.A2AServerConfig.Enabled {
-		logger, err = cleverchatty.InitLogger(config.LogFilePath, config.DebugMode)
-		if err != nil {
-			err = fmt.Errorf("error initializing logger: %v", err)
-			return
-		}
+	// change work directory to directoryPath because there could be relative paths in config
+	if err = os.Chdir(directoryPath); err != nil {
+		err = fmt.Errorf("error changing working directory to %s: %v", directoryPath, err)
 		return
 	}
-	err = fmt.Errorf("No any kind of server configured. It must be A2A (or other in future)")
+
+	// confirm there is at least one server to run
+	if !config.A2AServerConfig.Enabled {
+		err = fmt.Errorf("no any kind of server configured. It must be A2A (or other in future)")
+		return
+	}
+	logger, err = cleverchatty.InitLogger(config.LogFilePath, config.DebugMode)
+	if err != nil {
+		err = fmt.Errorf("error initializing logger: %v", err)
+		return
+	}
+
 	return
 }

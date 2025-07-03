@@ -50,6 +50,15 @@ func getA2AServer(
 	return a2aServer, nil
 }
 func (a *A2AServer) agentCard() a2aserver.AgentCard {
+	chatSkillName := a.A2AServerConfig.ChatSkillName
+	chatSkillDescription := a.A2AServerConfig.ChatSkillDescription
+
+	if chatSkillName == "" {
+		chatSkillName = "Communicate with AI"
+	}
+	if chatSkillDescription == "" {
+		chatSkillDescription = "Accepts a prompt and returns a response from the AI."
+	}
 	return a2aserver.AgentCard{
 		Name:        a.A2AServerConfig.Title,
 		Description: a.A2AServerConfig.Description,
@@ -66,8 +75,8 @@ func (a *A2AServer) agentCard() a2aserver.AgentCard {
 		Skills: []a2aserver.AgentSkill{
 			{
 				ID:          "ai_chat",
-				Name:        "Communicate with AI",
-				Description: stringPtr("Accepts a prompt and returns a response from the AI."),
+				Name:        chatSkillName,
+				Description: stringPtr(chatSkillDescription),
 				InputModes:  []string{a2aprotocol.KindText},
 				OutputModes: []string{a2aprotocol.KindText},
 			},

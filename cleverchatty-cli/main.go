@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"path/filepath"
 	"time"
 
 	markdown "github.com/MichaelMure/go-term-markdown"
@@ -170,6 +171,15 @@ func loadConfig() (*cleverchatty.CleverChattyConfig, error) {
 	if config.Google.APIKey == "" {
 		// The project structure is provider specific, but Google calls this GEMINI_API_KEY in e.g. AI Studio. Support both.
 		config.Google.APIKey = os.Getenv("GEMINI_API_KEY")
+	}
+
+	if configFile != "" {
+		directoryPath := filepath.Dir(configFile)
+
+		if err = os.Chdir(directoryPath); err != nil {
+			err = fmt.Errorf("error changing working directory to %s: %v", directoryPath, err)
+			return nil, err
+		}
 	}
 
 	return config, nil

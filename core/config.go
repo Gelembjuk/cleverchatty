@@ -115,12 +115,14 @@ type RAGConfig struct {
 }
 
 type A2AServerConfig struct {
-	Enabled      bool   `json:"enabled"`
-	Url          string `json:"url"`
-	Title        string `json:"title"`
-	Description  string `json:"description"`
-	ListenHost   string `json:"listen_host"`
-	Organization string `json:"organization"`
+	Enabled              bool   `json:"enabled"`
+	Url                  string `json:"url"`
+	Title                string `json:"title"`
+	Description          string `json:"description"`
+	ListenHost           string `json:"listen_host"`
+	Organization         string `json:"organization"`
+	ChatSkillName        string `json:"chat_skill_name,omitempty"`
+	ChatSkillDescription string `json:"chat_skill_description,omitempty"`
 }
 
 type CleverChattyConfig struct {
