@@ -10,6 +10,7 @@ import (
 	"time"
 
 	cleverchatty "github.com/gelembjuk/cleverchatty/core"
+	a2aclient "trpc.group/trpc-go/trpc-a2a-go/client"
 	a2aprotocol "trpc.group/trpc-go/trpc-a2a-go/protocol"
 	a2aserver "trpc.group/trpc-go/trpc-a2a-go/server"
 )
@@ -68,6 +69,27 @@ func checkServerIsCleverChatty(serverURL string) (bool, error) {
 		}
 	}
 	return false, nil // Not a CleverChatty server
+}
+func sendHelloMessage(ctx context.Context, serverURL string, agentid string) error {
+	a2aClient, err := a2aclient.NewA2AClient(serverURL)
+	if err != nil {
+		return fmt.Errorf("error creating A2A client: %v", err)
+	}
+	taskParams := a2aprotocol.SendMessageParams{
+		Message: a2aprotocol.Message{
+			Role: a2aprotocol.MessageRoleUser,
+			Parts: []a2aprotocol.Part{
+				a2aprotocol.NewTextPart("/hello"),
+			},
+		},
+		Metadata: map[string]any{
+			"agentid": agentid,
+		},
+	}
+
+	_, err = a2aClient.SendMessage(ctx, taskParams)
+
+	return err
 }
 func processA2AStreamEvents(ctx context.Context,
 	streamChan <-chan a2aprotocol.StreamingMessageEvent,

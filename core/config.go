@@ -116,6 +116,7 @@ type RAGConfig struct {
 
 type A2AServerConfig struct {
 	Enabled              bool   `json:"enabled"`
+	AgentIDRequired      bool   `json:"agent_id_required"`
 	Url                  string `json:"url"`
 	Title                string `json:"title"`
 	Description          string `json:"description"`
@@ -126,6 +127,7 @@ type A2AServerConfig struct {
 }
 
 type CleverChattyConfig struct {
+	Agentid           string                         `json:"agent_id"`
 	ServerConfig      ServerConfig                   `json:"server"`
 	LogFilePath       string                         `json:"log_file_path"`
 	DebugMode         bool                           `json:"debug_mode"`

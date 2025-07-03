@@ -106,6 +106,20 @@ func (a *A2AServer) ProcessMessage(
 		return nil, fmt.Errorf("no text part found in the message")
 	}
 
+	agentid := ""
+
+	if val, ok := message.Metadata["agentid"]; ok {
+		if str, ok := val.(string); ok {
+			agentid = str
+		}
+	}
+
+	if agentid == "" && a.A2AServerConfig.AgentIDRequired {
+		return nil, fmt.Errorf("agent ID is required")
+	}
+
+	// TODO. Authentication and authorization here
+
 	if message.ContextID == nil {
 		message.ContextID = stringPtr(uuid.New().String()) // Use an empty string if no context ID is provided
 	}
@@ -119,17 +133,14 @@ func (a *A2AServer) ProcessMessage(
 	}
 
 	if strings.HasPrefix(prompt, "/") {
+		if prompt == "/hello" {
+			// in fact this is a command to test the server and agentid (and auth in the future)
+			return a.buildTextMessageResponse("hello!"), nil
+		}
 		if prompt == "/quit" || prompt == "/exit" || prompt == "/bye" {
 			a.Logger.Printf("Received exit command, stopping server, removing session ID: %s", session.ID)
 			a.SessionsManager.FinishSession(session.ID) // Finish the session
-			// Return a simple response message
-			responseMessage := a2aprotocol.NewMessage(
-				a2aprotocol.MessageRoleAgent,
-				[]a2aprotocol.Part{a2aprotocol.NewTextPart("Bye!")},
-			)
-			return &a2ataskmanager.MessageProcessingResult{
-				Result: &responseMessage,
-			}, nil
+			return a.buildTextMessageResponse("Bye!"), nil
 		}
 	}
 
@@ -142,13 +153,7 @@ func (a *A2AServer) ProcessMessage(
 		}
 		a.Logger.Printf("Response from AI: %s. ", response)
 		// Return a simple response message
-		responseMessage := a2aprotocol.NewMessage(
-			a2aprotocol.MessageRoleAgent,
-			[]a2aprotocol.Part{a2aprotocol.NewTextPart(response)},
-		)
-		return &a2ataskmanager.MessageProcessingResult{
-			Result: &responseMessage,
-		}, nil
+		return a.buildTextMessageResponse(response), nil
 	}
 
 	a.Logger.Println("Using streaming mode")
@@ -242,7 +247,15 @@ func (a *A2AServer) ProcessMessage(
 	}, nil
 
 }
-
+func (a *A2AServer) buildTextMessageResponse(text string) *a2ataskmanager.MessageProcessingResult {
+	responseMessage := a2aprotocol.NewMessage(
+		a2aprotocol.MessageRoleAgent,
+		[]a2aprotocol.Part{a2aprotocol.NewTextPart(text)},
+	)
+	return &a2ataskmanager.MessageProcessingResult{
+		Result: &responseMessage,
+	}
+}
 func (a *A2AServer) statusUpdate(statusCode string, statusMessage string, statusMessageExtra string, taskID string, contextID string, subscriber a2ataskmanager.TaskSubscriber) {
 	workingEvent := a2aprotocol.StreamingMessageEvent{
 		Result: &a2aprotocol.TaskStatusUpdateEvent{

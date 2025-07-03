@@ -68,6 +68,9 @@ func handleSlashCommandAsClient(prompt string, a2aClient a2aclient.A2AClient, ct
 				},
 				ContextID: &contextID,
 			},
+			Metadata: map[string]any{
+				"agentid": agentid,
+			},
 		}
 
 		a2aClient.SendMessage(ctx, taskParams)

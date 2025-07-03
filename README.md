@@ -4,6 +4,8 @@
 
 Also, this package includes the CleverChatty Server, which can be started as a daemon and service many clients with A2A protocol. The server is designed to handle requests from various clients, humans or AI agents, and it can be used to manage multiple AI models and MCP servers.
 
+![<img src="docs/cleverchatty_core.png" width="250"/>](docs/cleverchatty_core.png)
+
 ## Key Features
 
 - Decoupled architecture: UI is not included in this package and is intended to be implemented separately. This allows for flexible front-end development across multiple platforms.
@@ -18,7 +20,7 @@ This package is ideal for developers building custom UIs (e.g., CLI, web, mobile
 
 ## UI for CleverChatty
 
-The package is designed to be used with any UI. However, if you are looking for a simple UI to test the package, you can use [CleverChatty CLI](https://github.com/Gelembjuk/cleverchatty/cleverchatty-cli). It is a command-line interface that allows you to interact with the CleverChatty package easily.
+The package is designed to be used with any UI. However, if you are looking for a simple UI to test the package, you can use [CleverChatty CLI](docs/Cli.md). It is a command-line interface that allows you to interact with the CleverChatty package easily.
 
 The CleverChatty CLI can be used in two modes:
 - As a standalone tool that runs locally and communicates with LLMs and MCP servers.

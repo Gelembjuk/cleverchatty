@@ -26,7 +26,7 @@ const (
 var (
 	debugMode        bool
 	server           string //A2A server address
-	userid           string // A2A user ID
+	agentid          string // A2A user ID
 	configFile       string
 	modelFlag        string // New flag for model selection
 	openaiBaseURL    string // Base URL for OpenAI API
@@ -47,7 +47,8 @@ var rootCmd = &cobra.Command{
 	Short: "Chat with AI models through a unified interface. Version: " + version,
 	Long: `cleverchatty-cli is a CLI tool that allows you to interact with CleverChatty server using CLI interface.
 	The tool can work in two modes:
-	- as a client to CleverChatty server, which can be run using cleverchatty-cli --server <server:port> --userid <user_id>
+	- as a client to CleverChatty server, which can be run using:
+		 cleverchatty-cli --server <server:port> --agentid <agent_id>
 	- as a standalone AI chat client, which can be run using:
 		 cleverchatty-cli --config <config_file>
 		 or 
@@ -60,7 +61,7 @@ Available models can be specified using the --model flag (or config file):
 - Google: google:modelname
 
 Example:
-  cleverchatty-cli --server localhost:8080 --userid user123
+  cleverchatty-cli --server localhost:8080 --agentid user123
   cleverchatty-cli --config config.json
   cleverchatty-cli --model anthropic:claude-3-5-sonnet-latest
   cleverchatty-cli -m ollama:qwen2.5:3b`,
@@ -81,11 +82,11 @@ var versionCmd = &cobra.Command{
 func init() {
 	rootCmd.AddCommand(versionCmd)
 	rootCmd.PersistentFlags().
-		StringVar(&configFile, "config", "", "config file. Use it to run CleverChatty as a standalone tool. Will be ignored if --server and --userid are set.")
+		StringVar(&configFile, "config", "", "config file. Use it to run CleverChatty as a standalone tool. Will be ignored if --server and --agentid are set.")
 	rootCmd.PersistentFlags().
 		StringVar(&server, "server", "", "CleverChatty server address.")
 	rootCmd.PersistentFlags().
-		StringVar(&userid, "userid", "", "User ID for CleverChatty.")
+		StringVar(&agentid, "agentid", "", "Agent ID to be identified by CleverChatty server.")
 	rootCmd.PersistentFlags().
 		StringVarP(&modelFlag, "model", "m", "",
 			"model to use (format: provider:model, e.g. anthropic:claude-3-5-sonnet-latest or ollama:qwen2.5:3b). If not provided then "+defaultModelFlag+" will be used")
@@ -134,6 +135,9 @@ func loadConfig() (*cleverchatty.CleverChattyConfig, error) {
 	}
 	if err != nil {
 		return nil, fmt.Errorf("error loading config file: %v", err)
+	}
+	if agentid != "" {
+		config.Agentid = agentid
 	}
 	if debugMode {
 		config.DebugMode = true
@@ -310,16 +314,23 @@ func runAsStandalone(ctx context.Context) error {
 }
 
 func runAsClient(ctx context.Context) error {
-	// 1. Create a new client instance.
-	a2aClient, err := a2aclient.NewA2AClient(server)
-	if err != nil {
-		return fmt.Errorf("error creating A2A client: %v", err)
-	}
-
-	// 2. Check for streaming capability by fetching the agent card
+	// 1. Check for streaming capability by fetching the agent card
 	check, err := checkServerIsCleverChatty(server)
 	if err != nil {
 		return fmt.Errorf("error checking server capabilities: %v", err)
+	}
+
+	err = sendHelloMessage(ctx, server, agentid)
+	if err != nil {
+		// If the server does not support CleverChatty AI chat, we return an error
+		// probably, agentid is not set or is wrong
+		return err
+	}
+
+	// 2. Create a new client instance.
+	a2aClient, err := a2aclient.NewA2AClient(server)
+	if err != nil {
+		return fmt.Errorf("error creating A2A client: %v", err)
 	}
 
 	if !check {
@@ -374,6 +385,9 @@ func runAsClient(ctx context.Context) error {
 
 		taskParams := a2aprotocol.SendMessageParams{
 			Message: message,
+			Metadata: map[string]any{
+				"agentid": agentid,
+			},
 		}
 
 		streamChan, err := a2aClient.StreamMessage(ctx, taskParams)
