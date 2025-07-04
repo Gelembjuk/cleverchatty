@@ -25,10 +25,16 @@ This package is ideal for developers building custom UIs (e.g., CLI, web, mobile
 
 The CleverChatty server is a standalone service that can be run to handle requests from clients using the A2A protocol. It allows you to manage AI models and MCP servers, providing a centralized point for AI interactions.
 
-To start it as a server, you can use the `cleverchatty-server` package. 
+To install the CleverChatty server, you can use the following command:
 
 ```bash
-./cleverchatty-server start --directory "../agent-filesystem"
+go install github.com/gelembjuk/cleverchatty/cleverchatty-server@latest
+```
+
+To start it as a server, you can use the command: 
+
+```bash
+cleverchatty-server start --directory "../agent-filesystem"
 ```
 
 The `--directory` option specifies the directory where the server configuration file is stored. This directory becomes a work directory for the server, and it is used to store logs and other files related to the server's operation. For example, MCP servers for STDIO can be stored there too.
@@ -36,7 +42,13 @@ The `--directory` option specifies the directory where the server configuration 
 To stop the server, you can use the command:
 
 ```bash
-./cleverchatty-server stop --directory "../agent-filesystem"
+cleverchatty-server stop --directory "../agent-filesystem"
+```
+
+Also, it is possible to run it interactively:
+
+```bash
+cleverchatty-server run --directory "../agent-filesystem"
 ```
 
 ![<img src="docs/cleverchatty_server.png" width="250"/>](docs/cleverchatty_server.png)

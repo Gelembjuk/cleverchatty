@@ -25,8 +25,16 @@ The CleverChatty CLI is a command-line interface tool that allows users to inter
 
 This tool is written in Go and can be installed using `go install` command.
 
+Install the CLI tool using the following command:
+
 ```bash
-go install github.com/gelembjuk/cleverchatty-cli@latest
+go install github.com/gelembjuk/cleverchatty/cleverchatty-cli@latest
+```
+
+Install the server using the following command:
+
+```bash
+go install github.com/gelembjuk/cleverchatty/cleverchatty-server@latest
 ```
 
 It will be installed in your `$GOPATH/bin` directory, so make sure it is in your `PATH`.
