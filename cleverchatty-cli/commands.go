@@ -67,9 +67,9 @@ func handleSlashCommandAsClient(prompt string, a2aClient a2aclient.A2AClient, ct
 					a2aprotocol.NewTextPart("/bye"),
 				},
 				ContextID: &contextID,
-			},
-			Metadata: map[string]any{
-				"agentid": agentid,
+				Metadata: map[string]any{
+					"agent_id": agentid,
+				},
 			},
 		}
 

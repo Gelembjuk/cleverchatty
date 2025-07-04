@@ -17,9 +17,13 @@ import (
 )
 
 type A2AAgent struct {
-	Endpoint string
-	Card     AgentCard
-	Logger   *log.Logger
+	HostingAgentID    string
+	HostingAgentTitle string // Title of the hosting agent, if any
+	Endpoint          string
+	Card              AgentCard
+	Logger            *log.Logger
+	Metadata          map[string]string
+	filterFunc        func(value string) string
 }
 
 // AgentCard represents the structure of the A2A agent.json
@@ -77,7 +81,7 @@ func fetchA2AAgentCard(baseURL string) (*AgentCard, error) {
 	return &card, nil
 }
 
-func NewA2AAgent(endpoint string, logger *log.Logger) (*A2AAgent, error) {
+func NewA2AAgent(endpoint string, metadata map[string]string, logger *log.Logger) (*A2AAgent, error) {
 	card, err := fetchA2AAgentCard(endpoint)
 	if err != nil {
 		return nil, fmt.Errorf("error fetching agent card: %v", err)
@@ -95,6 +99,7 @@ func NewA2AAgent(endpoint string, logger *log.Logger) (*A2AAgent, error) {
 		Endpoint: endpoint,
 		Card:     *card,
 		Logger:   logger,
+		Metadata: metadata,
 	}
 
 	return a2aAgent, nil
@@ -121,11 +126,30 @@ func (a *A2AAgent) sendMessage(skill string, toolArgs map[string]interface{}, ct
 		parts = append(parts, part)
 	}
 
-	message := a2aprotocol.Message{
-		Role:  a2aprotocol.MessageRoleUser,
-		Parts: parts,
+	metadata := map[string]any{
+		"skill":      skill,
+		"agent_name": a.HostingAgentTitle,
 	}
 
+	if a.HostingAgentID != "" {
+		metadata["agent_id"] = a.HostingAgentID
+	}
+
+	if a.Metadata != nil {
+		for key, value := range a.Metadata {
+			value = a.filterFunc(value)
+			metadata[key] = value
+		}
+	}
+
+	message := a2aprotocol.Message{
+		Role:     a2aprotocol.MessageRoleUser,
+		Parts:    parts,
+		Metadata: metadata,
+	}
+
+	a.Logger.Printf("Sending message to A2A server: %s", message)
+	a.Logger.Printf("Metadata: %v", metadata)
 	taskParams := a2aprotocol.SendMessageParams{
 		Message: message,
 	}

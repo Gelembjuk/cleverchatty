@@ -30,7 +30,7 @@ func NewSessionManager(config *CleverChattyConfig, ctx context.Context, logger *
 	}
 }
 
-func (sm *SessionManager) GetOrCreateSession(id string) (*Session, error) {
+func (sm *SessionManager) GetOrCreateSession(id string, clientAgentID string) (*Session, error) {
 	sm.mutex.RLock()
 	sm.logger.Printf("GetOrCreateSession called for ID: %s. There are %d active sessions", id, len(sm.sessions))
 	session, ok := sm.sessions[id]
@@ -41,6 +41,13 @@ func (sm *SessionManager) GetOrCreateSession(id string) (*Session, error) {
 	}
 
 	ai, err := GetCleverChattyWithLogger(*sm.config, sm.context, sm.logger)
+	if err != nil {
+		return nil, err
+	}
+
+	ai.WithClientAgentID(clientAgentID)
+
+	err = ai.Init()
 	if err != nil {
 		return nil, err
 	}

@@ -23,6 +23,10 @@ const (
 
 type ToolsHost struct {
 	config           map[string]ServerConfigWrapper
+	context          context.Context
+	clientAgentID    string
+	AgentID          string
+	AgentName        string
 	logger           *log.Logger
 	mcpClients       map[string]mcpclient.MCPClient
 	a2aClients       map[string]A2AAgent
@@ -51,6 +55,7 @@ type ServerInfo struct {
 	Headers   []string
 	Args      []string
 	Env       map[string]string
+	Metadata  map[string]string
 	Tools     []ServerToolInfo
 }
 
@@ -118,36 +123,41 @@ func newToolsHost(
 	ctx context.Context,
 ) (*ToolsHost, error) {
 	host := &ToolsHost{
-		config: mcpServersConfig,
-		logger: logger,
+		config:  mcpServersConfig,
+		context: ctx,
+		logger:  logger,
 	}
 
+	return host, nil
+}
+
+func (host *ToolsHost) Init() error {
 	err := host.createMCPClients()
 
 	if err != nil {
-		return nil, fmt.Errorf("failed to create MCP clients: %w", err)
+		return fmt.Errorf("failed to create MCP clients: %w", err)
 	}
 
 	err = host.createA2AClients()
 	if err != nil {
-		return nil, fmt.Errorf("failed to create A2A clients: %w", err)
+		return fmt.Errorf("failed to create A2A clients: %w", err)
 	}
 
 	host.tools = []llm.Tool{}
 
-	err = host.loadMCPTools(ctx)
+	err = host.loadMCPTools(host.context)
 	if err != nil {
 		host.Close()
-		return nil, fmt.Errorf("failed to load MCP tools: %w", err)
+		return fmt.Errorf("failed to load MCP tools: %w", err)
 	}
 
-	err = host.loadA2ATools(ctx)
+	err = host.loadA2ATools(host.context)
 	if err != nil {
 		host.Close()
-		return nil, fmt.Errorf("failed to load A2A tools: %w", err)
+		return fmt.Errorf("failed to load A2A tools: %w", err)
 	}
 
-	return host, nil
+	return nil
 }
 
 func (host ToolsHost) isMCPServer(serverName string) bool {
@@ -182,6 +192,14 @@ func (host ToolsHost) mcpToolsToAnthropicTools(
 	return anthropicTools
 }
 
+// The method replaces some templates with internal values
+// like agentid, sessionid, etc.
+func (host *ToolsHost) filterConfigValue(value string) string {
+	value = strings.ReplaceAll(value, "{CLIENT_AGENT_ID}", host.clientAgentID)
+	value = strings.ReplaceAll(value, "{AGENT_ID}", host.AgentID)
+	return value
+}
+
 // Create MCP servers instances
 func (host *ToolsHost) createMCPClients() error {
 	clients := make(map[string]mcpclient.MCPClient)
@@ -212,6 +230,8 @@ func (host *ToolsHost) createMCPClients() error {
 					if len(parts) == 2 {
 						key := strings.TrimSpace(parts[0])
 						value := strings.TrimSpace(parts[1])
+						// Replace placeholders in header values
+						value = host.filterConfigValue(value)
 						headers[key] = value
 					}
 				}
@@ -235,6 +255,7 @@ func (host *ToolsHost) createMCPClients() error {
 					if len(parts) == 2 {
 						key := strings.TrimSpace(parts[0])
 						value := strings.TrimSpace(parts[1])
+						value = host.filterConfigValue(value)
 						headers[key] = value
 					}
 				}
@@ -253,12 +274,19 @@ func (host *ToolsHost) createMCPClients() error {
 			stdioConfig := server.Config.(STDIOMCPServerConfig)
 			var env []string
 			for k, v := range stdioConfig.Env {
+				// Replace placeholders in environment variables
+				v = host.filterConfigValue(v)
 				env = append(env, fmt.Sprintf("%s=%s", k, v))
+			}
+			var stdioArgs []string
+			for _, arg := range stdioConfig.Args {
+				arg = host.filterConfigValue(arg)
+				stdioArgs = append(stdioArgs, arg)
 			}
 			client, err = mcpclient.NewStdioMCPClient(
 				stdioConfig.Command,
 				env,
-				stdioConfig.Args...)
+				stdioArgs...)
 		}
 		if err == nil {
 			err = client.(*mcpclient.Client).Start(context.Background())
@@ -333,10 +361,14 @@ func (host *ToolsHost) createA2AClients() error {
 
 		config := server.Config.(A2AToolsServerConfig)
 
-		agent, err := NewA2AAgent(config.Endpoint, host.logger)
+		agent, err := NewA2AAgent(config.Endpoint, config.Metadata, host.logger)
 		if err != nil {
 			return fmt.Errorf("failed to fetch agent card for %s: %w", name, err)
 		}
+
+		agent.filterFunc = host.filterConfigValue
+		agent.HostingAgentID = host.AgentID
+		agent.HostingAgentTitle = host.AgentName
 
 		clients[name] = *agent
 
@@ -607,7 +639,7 @@ func (host ToolsHost) getServersInfo() []ServerInfo {
 				Name:      name,
 				Transport: transportA2A,
 				Endpoint:  a2aServer.Endpoint,
-				Headers:   a2aServer.Headers,
+				Metadata:  a2aServer.Metadata,
 			})
 		case InternalServerConfig:
 			internalServer := server.Config.(InternalServerConfig)

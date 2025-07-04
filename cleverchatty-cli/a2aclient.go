@@ -81,9 +81,9 @@ func sendHelloMessage(ctx context.Context, serverURL string, agentid string) err
 			Parts: []a2aprotocol.Part{
 				a2aprotocol.NewTextPart("/hello"),
 			},
-		},
-		Metadata: map[string]any{
-			"agentid": agentid,
+			Metadata: map[string]any{
+				"agent_id": agentid,
+			},
 		},
 	}
 

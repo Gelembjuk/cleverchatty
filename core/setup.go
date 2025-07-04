@@ -16,13 +16,14 @@ import (
 )
 
 type CleverChatty struct {
-	context   context.Context
-	config    CleverChattyConfig
-	logger    *log.Logger
-	provider  llm.Provider
-	toolsHost *ToolsHost
-	messages  []history.HistoryMessage
-	Callbacks UICallbacks
+	context       context.Context
+	ClientAgentID string
+	config        CleverChattyConfig
+	logger        *log.Logger
+	provider      llm.Provider
+	toolsHost     *ToolsHost
+	messages      []history.HistoryMessage
+	Callbacks     UICallbacks
 }
 
 func GetCleverChatty(config CleverChattyConfig, ctx context.Context) (*CleverChatty, error) {
@@ -50,20 +51,34 @@ func GetCleverChattyWithLogger(config CleverChattyConfig, ctx context.Context, l
 
 	assistant.Callbacks = UICallbacks{}
 
-	var err error
-	assistant.provider, err = assistant.createProvider(ctx, config.Model)
-
-	if err != nil {
-		return nil, fmt.Errorf("error creating provider: %v", err)
-	}
-
-	assistant.toolsHost, err = newToolsHost(config.ToolsServers, logger, ctx)
-
-	if err != nil {
-		return nil, fmt.Errorf("error creating MCP host: %v", err)
-	}
-
 	return assistant, nil
+}
+
+func (assistant *CleverChatty) Init() error {
+	var err error
+	assistant.provider, err = assistant.createProvider(assistant.context, assistant.config.Model)
+
+	if err != nil {
+		return fmt.Errorf("error creating provider: %v", err)
+	}
+
+	assistant.toolsHost, err = newToolsHost(assistant.config.ToolsServers, assistant.logger, assistant.context)
+
+	if err != nil {
+		return fmt.Errorf("error creating MCP host: %v", err)
+	}
+
+	assistant.toolsHost.clientAgentID = assistant.ClientAgentID
+	assistant.toolsHost.AgentID = assistant.config.AgentID
+	assistant.toolsHost.AgentName = assistant.config.A2AServerConfig.Title
+
+	err = assistant.toolsHost.Init()
+
+	if err != nil {
+		return fmt.Errorf("error initializing MCP host: %v", err)
+	}
+
+	return nil
 }
 
 func (assistant *CleverChatty) WithLogger(logger *log.Logger) {
@@ -72,7 +87,14 @@ func (assistant *CleverChatty) WithLogger(logger *log.Logger) {
 
 func (assistant *CleverChatty) WithCallbacks(callbacks UICallbacks) {
 	assistant.Callbacks = callbacks
+}
 
+func (assistant *CleverChatty) WithClientAgentID(agentID string) {
+	assistant.ClientAgentID = agentID
+}
+
+func (assistant *CleverChatty) WithAgentID(agentID string) {
+	assistant.config.AgentID = agentID
 }
 
 // Add new function to create provider

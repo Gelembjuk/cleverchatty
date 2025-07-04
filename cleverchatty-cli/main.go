@@ -137,7 +137,7 @@ func loadConfig() (*cleverchatty.CleverChattyConfig, error) {
 		return nil, fmt.Errorf("error loading config file: %v", err)
 	}
 	if agentid != "" {
-		config.Agentid = agentid
+		config.AgentID = agentid
 	}
 	if debugMode {
 		config.DebugMode = true
@@ -257,7 +257,10 @@ func runAsStandalone(ctx context.Context) error {
 		return fmt.Errorf("error creating assistant: %v", err)
 	}
 
-	//cleverChattyObject.WithLogger(log)
+	cleverChattyObject.Init()
+	if err != nil {
+		return fmt.Errorf("error initializing assistant: %v", err)
+	}
 
 	defer func() {
 
@@ -381,13 +384,13 @@ func runAsClient(ctx context.Context) error {
 				a2aprotocol.NewTextPart(prompt),
 			},
 			ContextID: &contextID, // Use the context ID for the session
+			Metadata: map[string]any{
+				"agent_id": agentid,
+			},
 		}
 
 		taskParams := a2aprotocol.SendMessageParams{
 			Message: message,
-			Metadata: map[string]any{
-				"agentid": agentid,
-			},
 		}
 
 		streamChan, err := a2aClient.StreamMessage(ctx, taskParams)

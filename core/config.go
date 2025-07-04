@@ -85,8 +85,8 @@ func (s SSEMCPServerConfig) GetType() string {
 }
 
 type A2AToolsServerConfig struct {
-	Endpoint string   `json:"endpoint"`
-	Headers  []string `json:"headers,omitempty"`
+	Endpoint string            `json:"endpoint"`
+	Metadata map[string]string `json:"metadata,omitempty"`
 }
 
 func (s A2AToolsServerConfig) GetType() string {
@@ -127,7 +127,7 @@ type A2AServerConfig struct {
 }
 
 type CleverChattyConfig struct {
-	Agentid           string                         `json:"agent_id"`
+	AgentID           string                         `json:"agent_id"`
 	ServerConfig      ServerConfig                   `json:"server"`
 	LogFilePath       string                         `json:"log_file_path"`
 	DebugMode         bool                           `json:"debug_mode"`

@@ -108,7 +108,7 @@ func (a *A2AServer) ProcessMessage(
 
 	agentid := ""
 
-	if val, ok := message.Metadata["agentid"]; ok {
+	if val, ok := message.Metadata["agent_id"]; ok {
 		if str, ok := val.(string); ok {
 			agentid = str
 		}
@@ -126,7 +126,7 @@ func (a *A2AServer) ProcessMessage(
 
 	a.Logger.Printf("Text message: %s", prompt)
 
-	session, err := a.SessionsManager.GetOrCreateSession(*message.ContextID) // Ensure session exists
+	session, err := a.SessionsManager.GetOrCreateSession(*message.ContextID, agentid) // Ensure session exists
 
 	if err != nil {
 		return nil, fmt.Errorf("failed to get or create session: %w", err)

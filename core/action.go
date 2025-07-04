@@ -158,9 +158,25 @@ func (assistant *CleverChatty) Prompt(prompt string) (string, error) {
 		return "", nil
 	}
 
-	// append system instruction to the history
-	if assistant.config.SystemInstruction != "" && len(assistant.messages) == 0 {
-		assistant.messages = append(assistant.messages, history.NewSystemInstructionMessage(assistant.config.SystemInstruction))
+	if len(assistant.messages) == 0 {
+		// append system instruction to the history
+
+		instructions := ""
+
+		if assistant.config.SystemInstruction != "" {
+			instructions = assistant.config.SystemInstruction
+			instructions = strings.ReplaceAll(instructions, "{AGENT_ID}", assistant.config.AgentID)
+			instructions = strings.ReplaceAll(instructions, "{CLIENT_AGENT_ID}", assistant.ClientAgentID)
+		} else if assistant.ClientAgentID != "" {
+			instructions = fmt.Sprintf(
+				"You communicate with the agent ID %s. Use this ID for future references.",
+				assistant.ClientAgentID,
+			)
+		}
+
+		if instructions != "" {
+			assistant.messages = append(assistant.messages, history.NewSystemInstructionMessage(instructions))
+		}
 	}
 
 	assistant.pruneMessages()
