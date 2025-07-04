@@ -102,7 +102,7 @@ func handleHelpCommand() {
 	markdown.WriteString("- **/history**: Display conversation history\n")
 	markdown.WriteString("- **/quit**: Exit the application\n")
 	markdown.WriteString("\nYou can also press Ctrl+C at any time to quit.\n")
-	markdown.WriteString("CleverChatty CLI version: " + version + "\n")
+	markdown.WriteString("CleverChatty CLI version: " + cleverchatty.ThisAppVersion + "\n")
 
 	rendered, err := renderer.Render(markdown.String())
 	if err != nil {
@@ -126,7 +126,7 @@ func handleVersionCommand() {
 	}
 	var markdown strings.Builder
 
-	markdown.WriteString("## CleverChatty CLI version: " + version + "\n")
+	markdown.WriteString("## CleverChatty CLI version: " + cleverchatty.ThisAppVersion + "\n")
 
 	rendered, err := renderer.Render(markdown.String())
 	if err != nil {

@@ -18,8 +18,7 @@ import (
 	a2aprotocol "trpc.group/trpc-go/trpc-a2a-go/protocol"
 )
 
-const (
-	version          = "0.2.0"
+var (
 	defaultModelFlag = "anthropic:claude-3-5-sonnet-latest"
 )
 
@@ -44,7 +43,7 @@ var (
 
 var rootCmd = &cobra.Command{
 	Use:   "cleverchatty-cli",
-	Short: "Chat with AI models through a unified interface. Version: " + version,
+	Short: "Chat with AI models through a unified interface. Version: " + cleverchatty.ThisAppVersion,
 	Long: `cleverchatty-cli is a CLI tool that allows you to interact with CleverChatty server using CLI interface.
 	The tool can work in two modes:
 	- as a client to CleverChatty server, which can be run using:

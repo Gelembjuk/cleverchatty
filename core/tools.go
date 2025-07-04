@@ -309,8 +309,8 @@ func (host *ToolsHost) createMCPClients() error {
 		initRequest := mcp.InitializeRequest{}
 		initRequest.Params.ProtocolVersion = mcp.LATEST_PROTOCOL_VERSION
 		initRequest.Params.ClientInfo = mcp.Implementation{
-			Name:    thisToolName,
-			Version: thisToolVersion,
+			Name:    ThisAppName,
+			Version: ThisAppVersion,
 		}
 		initRequest.Params.Capabilities = mcp.ClientCapabilities{}
 

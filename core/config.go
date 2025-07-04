@@ -10,8 +10,8 @@ import (
 )
 
 const (
-	thisToolName               = "CleverChatty"
-	thisToolVersion            = "0.1.0"
+	ThisAppName                = "CleverChatty"
+	ThisAppVersion             = "0.2.0"
 	transportStdio             = "stdio"
 	transportHTTPStreaming     = "http_streaming"
 	transportSSE               = "sse"
@@ -28,6 +28,7 @@ const (
 )
 
 const (
+	// this will be changed in the future. The text will be removed from here
 	commentOnNotificationReceived = "Notification received from server: %s. The tool %s has been called. The next message is the content of the notification."
 )
 
