@@ -151,7 +151,7 @@ func (host *ToolsHost) Init() error {
 		return fmt.Errorf("failed to load MCP tools: %w", err)
 	}
 
-	err = host.loadA2ATools(host.context)
+	err = host.loadA2ATools()
 	if err != nil {
 		host.Close()
 		return fmt.Errorf("failed to load A2A tools: %w", err)
@@ -463,7 +463,7 @@ func (host *ToolsHost) loadMCPTools(ctx context.Context) error {
 	return nil
 }
 
-func (host *ToolsHost) loadA2ATools(ctx context.Context) error {
+func (host *ToolsHost) loadA2ATools() error {
 	var allTools []llm.Tool
 	for serverName, a2aClient := range host.a2aClients {
 		config, ok := host.config[serverName]

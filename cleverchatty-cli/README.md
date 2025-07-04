@@ -6,4 +6,4 @@ This application is the command line AI chat tool. It allows to communicate with
 
 It can be execute as a **standalone tool** or as a **client for the CleverChatty server**.
 
-Find more information in the [CleverChatty CLI documentation](docs/Cli.md).
+Find more information in the [CleverChatty CLI documentation](../docs/Cli.md).

@@ -21,10 +21,10 @@ var (
 	tokyoBlue   = lipgloss.Color("111") // #7aa2f7
 	tokyoGreen  = lipgloss.Color("120") // #73daca
 	tokyoRed    = lipgloss.Color("203") // #f7768e
-	tokyoOrange = lipgloss.Color("215") // #ff9e64
-	tokyoFg     = lipgloss.Color("189") // #c0caf5
-	tokyoGray   = lipgloss.Color("237") // #3b4261
-	tokyoBg     = lipgloss.Color("234") // #1a1b26
+	//tokyoOrange = lipgloss.Color("215") // #ff9e64
+	tokyoFg = lipgloss.Color("189") // #c0caf5
+	//tokyoGray   = lipgloss.Color("237") // #3b4261
+	tokyoBg = lipgloss.Color("234") // #1a1b26
 
 	promptStyle = lipgloss.NewStyle().
 			Foreground(tokyoBlue)
@@ -42,10 +42,10 @@ var (
 			PaddingLeft(2).
 			Bold(true)
 
-	descriptionStyle = lipgloss.NewStyle().
-				Foreground(tokyoFg).
-				PaddingLeft(2).
-				PaddingBottom(1)
+	//descriptionStyle = lipgloss.NewStyle().
+	//			Foreground(tokyoFg).
+	//			PaddingLeft(2).
+	//			PaddingBottom(1)
 
 	contentStyle = lipgloss.NewStyle().
 			Background(tokyoBg).

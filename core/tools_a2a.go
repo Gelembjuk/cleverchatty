@@ -12,7 +12,6 @@ import (
 
 	"github.com/gelembjuk/cleverchatty/core/history"
 	a2aclient "trpc.group/trpc-go/trpc-a2a-go/client"
-	"trpc.group/trpc-go/trpc-a2a-go/protocol"
 	a2aprotocol "trpc.group/trpc-go/trpc-a2a-go/protocol"
 )
 
@@ -148,8 +147,6 @@ func (a *A2AAgent) sendMessage(skill string, toolArgs map[string]interface{}, ct
 		Metadata: metadata,
 	}
 
-	a.Logger.Printf("Sending message to A2A server: %s", message)
-	a.Logger.Printf("Metadata: %v", metadata)
 	taskParams := a2aprotocol.SendMessageParams{
 		Message: message,
 	}
@@ -165,23 +162,23 @@ func (a *A2AAgent) sendMessage(skill string, toolArgs map[string]interface{}, ct
 
 	// Handle the result based on its type
 	switch result := messageResult.Result.(type) {
-	case *protocol.Message:
+	case *a2aprotocol.Message:
 		return a.buildResponseFromMessage(*result)
-	case *protocol.Task:
+	case *a2aprotocol.Task:
 		a.Logger.Printf("Received task response - ID: %s, State: %s", result.ID, result.Status.State)
-		if result.Status.State == protocol.TaskStateCompleted ||
-			result.Status.State == protocol.TaskStateFailed ||
-			result.Status.State == protocol.TaskStateCanceled {
+		if result.Status.State == a2aprotocol.TaskStateCompleted ||
+			result.Status.State == a2aprotocol.TaskStateFailed ||
+			result.Status.State == a2aprotocol.TaskStateCanceled {
 			return a.buildResponseFromTask(result)
 		}
 
 		a.Logger.Printf("Task %s is %s, fetching final state...", result.ID, result.Status.State)
 
 		// Get the task's final state.
-		queryParams := protocol.TaskQueryParams{
+		queryParams := a2aprotocol.TaskQueryParams{
 			ID: result.ID,
 		}
-		var task *protocol.Task
+		var task *a2aprotocol.Task
 		attemptCount := 0
 		maxAttempts := 5
 		for {
@@ -195,9 +192,9 @@ func (a *A2AAgent) sendMessage(skill string, toolArgs map[string]interface{}, ct
 
 			a.Logger.Printf("Task %s final state: %s", task.ID, task.Status.State)
 
-			if task.Status.State == protocol.TaskStateCompleted ||
-				task.Status.State == protocol.TaskStateFailed ||
-				task.Status.State == protocol.TaskStateCanceled {
+			if task.Status.State == a2aprotocol.TaskStateCompleted ||
+				task.Status.State == a2aprotocol.TaskStateFailed ||
+				task.Status.State == a2aprotocol.TaskStateCanceled {
 				break // Exit loop if task is in a terminal state
 			}
 			attemptCount++
@@ -215,19 +212,19 @@ func (a *A2AAgent) sendMessage(skill string, toolArgs map[string]interface{}, ct
 	}
 }
 
-func (a *A2AAgent) buildResponseFromMessage(message protocol.Message) ToolCallResult {
+func (a *A2AAgent) buildResponseFromMessage(message a2aprotocol.Message) ToolCallResult {
 	result := ToolCallResult{
 		Content: make([]history.Content, 0),
 	}
 	for _, part := range message.Parts {
 		switch p := part.(type) {
-		case *protocol.TextPart:
+		case *a2aprotocol.TextPart:
 			result.Content = append(result.Content, history.TextContent{
 				Text: p.Text,
 			})
-		case *protocol.FilePart:
+		case *a2aprotocol.FilePart:
 			// not supported yet
-		case *protocol.DataPart:
+		case *a2aprotocol.DataPart:
 			// not supported yet
 		default:
 
@@ -238,7 +235,7 @@ func (a *A2AAgent) buildResponseFromMessage(message protocol.Message) ToolCallRe
 }
 
 // printTaskResult prints the contents of a task result.
-func (a *A2AAgent) buildResponseFromTask(task *protocol.Task) ToolCallResult {
+func (a *A2AAgent) buildResponseFromTask(task *a2aprotocol.Task) ToolCallResult {
 	if task.Status.Message != nil {
 		return a.buildResponseFromMessage(*task.Status.Message)
 	}
@@ -254,13 +251,13 @@ func (a *A2AAgent) buildResponseFromTask(task *protocol.Task) ToolCallResult {
 			//}
 			for _, part := range artifact.Parts {
 				switch p := part.(type) {
-				case *protocol.TextPart:
+				case *a2aprotocol.TextPart:
 					result.Content = append(result.Content, history.TextContent{
 						Text: p.Text,
 					})
-				case *protocol.FilePart:
+				case *a2aprotocol.FilePart:
 					// not supported yet
-				case *protocol.DataPart:
+				case *a2aprotocol.DataPart:
 					// not supported yet
 				default:
 					// not supported yet
