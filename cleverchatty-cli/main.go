@@ -256,7 +256,7 @@ func runAsStandalone(ctx context.Context) error {
 		return fmt.Errorf("error creating assistant: %v", err)
 	}
 
-	cleverChattyObject.Init()
+	err = cleverChattyObject.Init()
 	if err != nil {
 		return fmt.Errorf("error initializing assistant: %v", err)
 	}

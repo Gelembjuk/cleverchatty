@@ -311,9 +311,10 @@ func handleHistoryCommand(cleverChattyObject cleverchatty.CleverChatty) {
 
 	for _, msg := range cleverChattyObject.GetMessages() {
 		roleTitle := "## User"
-		if msg.Role == "assistant" {
+		switch msg.Role {
+		case "assistant":
 			roleTitle = "## Assistant"
-		} else if msg.Role == "system" {
+		case "system":
 			roleTitle = "## System"
 		}
 		markdown.WriteString(roleTitle + "\n\n")

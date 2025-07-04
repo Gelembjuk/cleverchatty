@@ -26,9 +26,10 @@ func (assistant *CleverChatty) pruneMessages() {
 	// First pass: collect all tool use and result IDs
 	for _, msg := range assistant.messages {
 		for _, block := range msg.Content {
-			if block.Type == "tool_use" {
+			switch block.Type {
+			case "tool_use":
 				toolUseIds[block.ID] = true
-			} else if block.Type == "tool_result" {
+			case "tool_result":
 				toolResultIds[block.ToolUseID] = true
 			}
 		}
@@ -40,9 +41,10 @@ func (assistant *CleverChatty) pruneMessages() {
 		var prunedBlocks []history.ContentBlock
 		for _, block := range msg.Content {
 			keep := true
-			if block.Type == "tool_use" {
+			switch block.Type {
+			case "tool_use":
 				keep = toolResultIds[block.ID]
-			} else if block.Type == "tool_result" {
+			case "tool_result":
 				keep = toolUseIds[block.ToolUseID]
 			}
 			if keep {

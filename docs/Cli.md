@@ -2,10 +2,15 @@
 
 The CleverChatty CLI is a command-line interface tool that allows users to interact with the CleverChatty server or run it as a standalone AI chat client.
 
-- [Standalone Mode](#standalone-mode)
-    - [Usage with config file](#usage-with-config-file)
-    - [Usage with inline arguments](#usage-with-inline-arguments)
+## Table of Contents
+
+- [Features](#features)
+- [Installation](#installation)
+- [Quick run in standalone mode](#quick-run-in-standalone-mode)
+    - [With command line arguments](#with-command-line-arguments)
+    - [Use the config file](#use-the-config-file)
     - [Hybrid Mode](#hybrid-mode)
+- [Use as UI for the CleverChatty server](#use-as-ui-for-the-cleverchatty-server)
 
 ## Features
 

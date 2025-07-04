@@ -214,10 +214,12 @@ func runServer() error {
 			directoryPath,
 			logger)
 		if err != nil {
+			commonContextCancel()
 			return fmt.Errorf("failed to initialize A2A server: %v", err)
 		}
 		err = a2aServer.Start()
 		if err != nil {
+			commonContextCancel()
 			return fmt.Errorf("failed to start A2A server: %v", err)
 		}
 		logger.Println("A2A server started successfully.")
