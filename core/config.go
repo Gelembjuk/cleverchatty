@@ -126,6 +126,16 @@ type RAGConfig struct {
 	PreprocessingPrompt  string `json:"preprocessing_prompt"`
 }
 
+type ToolListenConfig struct {
+	ServerID string   `json:"server_id"`
+	Tools    []string `json:"tools"`
+}
+
+type ToolsListenerConfig struct {
+	Enabled     bool               `json:"enabled"`
+	ToolServers []ToolListenConfig `json:"tool_servers"`
+}
+
 type A2AServerConfig struct {
 	Enabled              bool   `json:"enabled"`
 	AgentIDRequired      bool   `json:"agent_id_required"`
@@ -168,6 +178,7 @@ type CleverChattyConfig struct {
 	RAGConfig                RAGConfig                      `json:"rag_settings"`
 	A2AServerConfig          A2AServerConfig                `json:"a2a_settings"`
 	ReverseMCPListenerConfig ReverseMCPListenerConfig       `json:"reverse_mcp_settings"`
+	ToolsListenerConfig      ToolsListenerConfig            `json:"tools_listener_settings"`
 }
 
 func CreateStandardConfigFile(configPath string) (*CleverChattyConfig, error) {

@@ -133,7 +133,7 @@ func (tc *ToolCallResult) validateNotEmpty() {
 	}
 }
 
-func newToolsHost(
+func NewToolsHost(
 	mcpServersConfig map[string]ServerConfigWrapper,
 	logger *log.Logger,
 	ctx context.Context,
@@ -794,7 +794,7 @@ func (host *ToolsHost) getToolsInfo() []ServerInfo {
 
 // if there is a memory MCP server, then it should be used. Send the messages to it
 // this is async, so the messages are not sent immediately
-func (host *ToolsHost) Remember(role string, content history.ContentBlock, ctx context.Context) {
+func (host *ToolsHost) Remember(role string, content history.ContentBlock, channel string, ctx context.Context) {
 	if host.memoryServerName == "" {
 		return
 	}
@@ -813,6 +813,7 @@ func (host *ToolsHost) Remember(role string, content history.ContentBlock, ctx c
 		map[string]interface{}{
 			"role":     role,
 			"contents": content.Text,
+			"channel":  channel,
 		},
 		ctx,
 	)
@@ -826,7 +827,7 @@ func (host *ToolsHost) Remember(role string, content history.ContentBlock, ctx c
 }
 
 // requests the memory server to recall the messages
-func (host *ToolsHost) Recall(ctx context.Context, prompt string) (string, error) {
+func (host *ToolsHost) Recall(ctx context.Context, prompt string, channel string) (string, error) {
 	if host.memoryServerName == "" {
 		return "", nil
 	}
@@ -836,7 +837,8 @@ func (host *ToolsHost) Recall(ctx context.Context, prompt string) (string, error
 		host.memoryServerName,
 		memoryToolRecallName,
 		map[string]interface{}{
-			"query": prompt,
+			"query":   prompt,
+			"channel": channel,
 		},
 		ctx,
 	)

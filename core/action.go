@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"slices"
 	"strings"
 	"time"
 
@@ -75,7 +76,58 @@ func (assistant *CleverChatty) addToMemory(role string, content string) {
 	assistant.toolsHost.Remember(role, history.ContentBlock{
 		Type: "text",
 		Text: content,
-	}, context.Background())
+	}, assistant.ClientAgentID, context.Background())
+}
+
+func (assistant *CleverChatty) addToolRequestToMemory(serverName string, toolName string, toolRequest llm.ToolCall, toolResponse ToolCallResult) {
+	/*
+	* Remember the tool request and response in the memory server.
+	* Find if this tool is in the list of notification producers.
+	* If it is, then remember the request and response in the memory server.
+	 */
+	if !assistant.config.ToolsListenerConfig.Enabled {
+		return // no tools listener configured, nothing to remember
+	}
+	found := false
+	for _, tool := range assistant.config.ToolsListenerConfig.ToolServers {
+		if tool.ServerID == serverName {
+			// Check if toolName is in tool.Tools array
+			if slices.Contains(tool.Tools, toolName) {
+				found = true
+				break
+			}
+		}
+	}
+	if !found {
+		// tool is not in the list of notification producers, nothing to remember
+		return
+	}
+	// This tool is in the list of notification producers, remember the request and response
+	// Remember the request. IT is the request from the agent to a tool
+	assistant.toolsHost.Remember(
+		"assistant",
+		history.ContentBlock{
+			Type:      "text",
+			Text:      fmt.Sprintf("Tool %s called with arguments: %s", toolName, toolRequest.GetArguments()),
+			ToolUseID: toolRequest.GetID(),
+		},
+		fmt.Sprintf("%s__%s", serverName, toolName),
+		context.Background(),
+	)
+
+	if toolResponse.Error == nil {
+		// Remember the response if there is no error
+		assistant.toolsHost.Remember(
+			"user", // we consider a tool like a user. TODO: maybe we should use "tool" role?
+			history.ContentBlock{
+				Type:      "text",
+				Text:      fmt.Sprintf("Tool %s returned: %s", toolName, toolResponse.getTextContent()),
+				ToolUseID: toolRequest.GetID(),
+			},
+			fmt.Sprintf("%s__%s", serverName, toolName),
+			context.Background(),
+		)
+	}
 }
 
 func (assistant *CleverChatty) injectMemories(prompt string) {
@@ -83,7 +135,7 @@ func (assistant *CleverChatty) injectMemories(prompt string) {
 	// TODO. Add timeouts to context
 	assistant.Callbacks.CallMemoryRetrievalStarted()
 
-	memories, _ := assistant.toolsHost.Recall(context.Background(), prompt)
+	memories, _ := assistant.toolsHost.Recall(context.Background(), prompt, assistant.ClientAgentID)
 
 	if memories == "" {
 		return // no memories to inject
@@ -352,6 +404,8 @@ func (assistant *CleverChatty) processPrompt(prompt string) (string, error) {
 			})
 			continue
 		}
+		// Remember this request in the memory server
+		assistant.addToolRequestToMemory(serverName, toolName, toolCall, toolResult)
 
 		// Create the tool result block
 		resultBlock := history.ContentBlock{
