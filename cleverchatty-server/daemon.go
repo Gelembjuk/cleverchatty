@@ -207,6 +207,9 @@ func runServer() error {
 	var a2aServer *A2AServer
 	a2aServer = nil
 
+	var toolsNotificationsServer *ToolsNotificationsServer
+	toolsNotificationsServer = nil
+
 	if config.A2AServerConfig.Enabled {
 		a2aServer, err = getA2AServer(
 			sessions_manager,
@@ -225,6 +228,24 @@ func runServer() error {
 		logger.Println("A2A server started successfully.")
 	}
 
+	if config.ToolsListenerConfig.Enabled {
+		// run seperate tools listener server. it will connect to each tools server, subscribe for notifications
+		toolsNotificationsServer, err = getToolsNotificationsServer(
+			sessions_manager,
+			&config.ToolsListenerConfig,
+			logger)
+		if err != nil {
+			commonContextCancel()
+			return fmt.Errorf("failed to initialize tools notifications server: %v", err)
+		}
+		err = toolsNotificationsServer.Start()
+		if err != nil {
+			commonContextCancel()
+			return fmt.Errorf("failed to start tools notifications server: %v", err)
+		}
+		logger.Println("Tools notifications server started successfully.")
+	}
+
 	shutDown := func() {
 		if a2aServer != nil {
 			logger.Println("Stopping A2A server...")
@@ -235,6 +256,16 @@ func runServer() error {
 				logger.Println("A2A server stopped successfully.")
 			}
 			a2aServer = nil
+		}
+		if toolsNotificationsServer != nil {
+			logger.Println("Stopping tools notifications server...")
+			err := toolsNotificationsServer.Stop()
+			if err != nil {
+				logger.Printf("Error stopping tools notifications server: %v", err)
+			} else {
+				logger.Println("Tools notifications server stopped successfully.")
+			}
+			toolsNotificationsServer = nil
 		}
 		commonContextCancel()
 		logger.Println("Daemon shutting down.")

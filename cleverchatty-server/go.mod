@@ -3,7 +3,7 @@ module github.com/gelembjuk/cleverchatty/cleverchatty-server
 go 1.24.1
 
 require (
-	github.com/gelembjuk/cleverchatty/core v0.0.0-20250704155525-73046dff975e
+	github.com/gelembjuk/cleverchatty/core v0.0.0-20250704203057-73843861c0cc
 	github.com/google/uuid v1.6.0
 	github.com/spf13/cobra v1.9.1
 	trpc.group/trpc-go/trpc-a2a-go v0.2.0
@@ -60,3 +60,5 @@ require (
 	google.golang.org/grpc v1.71.0 // indirect
 	google.golang.org/protobuf v1.36.6 // indirect
 )
+
+replace github.com/gelembjuk/cleverchatty/core => ../core

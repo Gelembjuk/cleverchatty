@@ -115,6 +115,16 @@ type RAGConfig struct {
 	PreprocessingPrompt  string `json:"preprocessing_prompt"`
 }
 
+type ToolListenConfig struct {
+	ServerID string   `json:"server_id"`
+	Tools    []string `json:"tools"`
+}
+
+type ToolsListenerConfig struct {
+	Enabled     bool               `json:"enabled"`
+	ToolServers []ToolListenConfig `json:"tool_servers"`
+}
+
 type A2AServerConfig struct {
 	Enabled              bool   `json:"enabled"`
 	AgentIDRequired      bool   `json:"agent_id_required"`
@@ -128,19 +138,20 @@ type A2AServerConfig struct {
 }
 
 type CleverChattyConfig struct {
-	AgentID           string                         `json:"agent_id"`
-	ServerConfig      ServerConfig                   `json:"server"`
-	LogFilePath       string                         `json:"log_file_path"`
-	DebugMode         bool                           `json:"debug_mode"`
-	MessageWindow     int                            `json:"message_window"`
-	Model             string                         `json:"model"`
-	SystemInstruction string                         `json:"system_instruction"`
-	Anthropic         AnthropicConfig                `json:"anthropic"`
-	OpenAI            OpenAIConfig                   `json:"openai"`
-	Google            GoogleConfig                   `json:"google"`
-	ToolsServers      map[string]ServerConfigWrapper `json:"tools_servers,omitempty"`
-	RAGConfig         RAGConfig                      `json:"rag_settings"`
-	A2AServerConfig   A2AServerConfig                `json:"a2a_settings"`
+	AgentID             string                         `json:"agent_id"`
+	ServerConfig        ServerConfig                   `json:"server"`
+	LogFilePath         string                         `json:"log_file_path"`
+	DebugMode           bool                           `json:"debug_mode"`
+	MessageWindow       int                            `json:"message_window"`
+	Model               string                         `json:"model"`
+	SystemInstruction   string                         `json:"system_instruction"`
+	Anthropic           AnthropicConfig                `json:"anthropic"`
+	OpenAI              OpenAIConfig                   `json:"openai"`
+	Google              GoogleConfig                   `json:"google"`
+	ToolsServers        map[string]ServerConfigWrapper `json:"tools_servers,omitempty"`
+	RAGConfig           RAGConfig                      `json:"rag_settings"`
+	A2AServerConfig     A2AServerConfig                `json:"a2a_settings"`
+	ToolsListenerConfig ToolsListenerConfig            `json:"tools_listener_settings"`
 }
 
 func CreateStandardConfigFile(configPath string) (*CleverChattyConfig, error) {
