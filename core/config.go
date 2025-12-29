@@ -17,6 +17,7 @@ const (
 	transportSSE               = "sse"
 	transportA2A               = "a2a"
 	transportInternal          = "internal"
+	transportReverseMCP        = "reverse_mcp"
 	toolsServerInterfaceNone   = "none"
 	toolsServerInterfaceMemory = "memory"
 	toolsServerInterfaceRAG    = "rag"
@@ -127,20 +128,29 @@ type A2AServerConfig struct {
 	ChatSkillDescription string `json:"chat_skill_description,omitempty"`
 }
 
+// ReverseMCPServerConfig defines the configuration for the reverse MCP server
+// This server accepts incoming MCP connections from remote MCP servers
+type ReverseMCPServerConfig struct {
+	Enabled    bool     `json:"enabled"`
+	ListenHost string   `json:"listen_host"`
+	AuthTokens []string `json:"auth_tokens,omitempty"` // List of valid auth tokens for authentication
+}
+
 type CleverChattyConfig struct {
-	AgentID           string                         `json:"agent_id"`
-	ServerConfig      ServerConfig                   `json:"server"`
-	LogFilePath       string                         `json:"log_file_path"`
-	DebugMode         bool                           `json:"debug_mode"`
-	MessageWindow     int                            `json:"message_window"`
-	Model             string                         `json:"model"`
-	SystemInstruction string                         `json:"system_instruction"`
-	Anthropic         AnthropicConfig                `json:"anthropic"`
-	OpenAI            OpenAIConfig                   `json:"openai"`
-	Google            GoogleConfig                   `json:"google"`
-	ToolsServers      map[string]ServerConfigWrapper `json:"tools_servers,omitempty"`
-	RAGConfig         RAGConfig                      `json:"rag_settings"`
-	A2AServerConfig   A2AServerConfig                `json:"a2a_settings"`
+	AgentID                string                         `json:"agent_id"`
+	ServerConfig           ServerConfig                   `json:"server"`
+	LogFilePath            string                         `json:"log_file_path"`
+	DebugMode              bool                           `json:"debug_mode"`
+	MessageWindow          int                            `json:"message_window"`
+	Model                  string                         `json:"model"`
+	SystemInstruction      string                         `json:"system_instruction"`
+	Anthropic              AnthropicConfig                `json:"anthropic"`
+	OpenAI                 OpenAIConfig                   `json:"openai"`
+	Google                 GoogleConfig                   `json:"google"`
+	ToolsServers           map[string]ServerConfigWrapper `json:"tools_servers,omitempty"`
+	RAGConfig              RAGConfig                      `json:"rag_settings"`
+	A2AServerConfig        A2AServerConfig                `json:"a2a_settings"`
+	ReverseMCPServerConfig ReverseMCPServerConfig         `json:"reverse_mcp_settings"`
 }
 
 func CreateStandardConfigFile(configPath string) (*CleverChattyConfig, error) {

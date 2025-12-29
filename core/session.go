@@ -14,11 +14,12 @@ type Session struct {
 }
 
 type SessionManager struct {
-	sessions map[string]*Session
-	mutex    sync.RWMutex
-	config   *CleverChattyConfig
-	context  context.Context
-	logger   *log.Logger
+	sessions         map[string]*Session
+	mutex            sync.RWMutex
+	config           *CleverChattyConfig
+	context          context.Context
+	logger           *log.Logger
+	reverseMCPClient ReverseMCPClient
 }
 
 func NewSessionManager(config *CleverChattyConfig, ctx context.Context, logger *log.Logger) *SessionManager {
@@ -28,6 +29,11 @@ func NewSessionManager(config *CleverChattyConfig, ctx context.Context, logger *
 		context:  ctx,
 		logger:   logger,
 	}
+}
+
+// SetReverseMCPClient sets the reverse MCP client for dynamic tool registration
+func (sm *SessionManager) SetReverseMCPClient(client ReverseMCPClient) {
+	sm.reverseMCPClient = client
 }
 
 func (sm *SessionManager) GetOrCreateSession(id string, clientAgentID string) (*Session, error) {
@@ -50,6 +56,11 @@ func (sm *SessionManager) GetOrCreateSession(id string, clientAgentID string) (*
 	err = ai.Init()
 	if err != nil {
 		return nil, err
+	}
+
+	// Set reverse MCP client if available
+	if sm.reverseMCPClient != nil {
+		ai.SetReverseMCPClient(sm.reverseMCPClient)
 	}
 
 	// Create new session

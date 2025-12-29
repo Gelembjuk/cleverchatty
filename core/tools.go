@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log"
+	"sync"
 	"time"
 
 	"strings"
@@ -21,6 +22,14 @@ const (
 	ragToolName            = "knowledge_search"
 )
 
+// ReverseMCPClient interface for reverse MCP connections
+// This interface is implemented by the reverse MCP server in cleverchatty-server
+type ReverseMCPClient interface {
+	CallTool(serverName, toolName string, args map[string]interface{}, ctx context.Context) (ToolCallResult, error)
+	GetTools(serverName string) []mcp.Tool
+	GetAllTools() map[string][]mcp.Tool
+}
+
 type ToolsHost struct {
 	config           map[string]ServerConfigWrapper
 	context          context.Context
@@ -30,7 +39,9 @@ type ToolsHost struct {
 	logger           *log.Logger
 	mcpClients       map[string]mcpclient.MCPClient
 	a2aClients       map[string]A2AAgent
+	reverseMCPClient ReverseMCPClient
 	tools            []llm.Tool
+	toolsMux         sync.RWMutex
 	memoryServerName string
 	ragServerName    string
 }
@@ -69,6 +80,8 @@ func (si ServerInfo) GetType() string {
 		return transportHTTPStreaming
 	case transportA2A:
 		return transportA2A
+	case transportReverseMCP:
+		return transportReverseMCP
 	default:
 		return "unknown"
 	}
@@ -81,6 +94,9 @@ func (si ServerInfo) IsMCP() bool {
 }
 func (si ServerInfo) IsA2A() bool {
 	return si.Transport == transportA2A
+}
+func (si ServerInfo) IsReverseMCP() bool {
+	return si.Transport == transportReverseMCP
 }
 
 func (si ServerInfo) IsMCPSSEServer() bool {
@@ -160,16 +176,49 @@ func (host *ToolsHost) Init() error {
 	return nil
 }
 
-func (host ToolsHost) isMCPServer(serverName string) bool {
+func (host *ToolsHost) isMCPServer(serverName string) bool {
 	_, ok := host.mcpClients[serverName]
 	return ok
 }
-func (host ToolsHost) isA2AServer(serverName string) bool {
+func (host *ToolsHost) isA2AServer(serverName string) bool {
 	_, ok := host.a2aClients[serverName]
 	return ok
 }
 
-func (host ToolsHost) mcpToolsToAnthropicTools(
+func (host *ToolsHost) isReverseMCPServer(serverName string) bool {
+	if host.reverseMCPClient == nil {
+		return false
+	}
+	tools := host.reverseMCPClient.GetTools(serverName)
+	return len(tools) > 0
+}
+
+// SetReverseMCPClient sets the reverse MCP client for dynamic tool registration
+func (host *ToolsHost) SetReverseMCPClient(client ReverseMCPClient) {
+	host.reverseMCPClient = client
+}
+
+// GetAllToolsForLLM returns all tools including dynamically loaded reverse MCP tools
+func (host *ToolsHost) GetAllToolsForLLM() []llm.Tool {
+	host.toolsMux.RLock()
+	// Start with a copy of static tools
+	allTools := make([]llm.Tool, len(host.tools))
+	copy(allTools, host.tools)
+	host.toolsMux.RUnlock()
+
+	// Add reverse MCP tools dynamically
+	if host.reverseMCPClient != nil {
+		reverseMCPTools := host.reverseMCPClient.GetAllTools()
+		for serverName, tools := range reverseMCPTools {
+			converted := host.mcpToolsToAnthropicTools(serverName, tools)
+			allTools = append(allTools, converted...)
+		}
+	}
+
+	return allTools
+}
+
+func (host *ToolsHost) mcpToolsToAnthropicTools(
 	serverName string,
 	mcpTools []mcp.Tool,
 ) []llm.Tool {
@@ -390,7 +439,7 @@ func (host *ToolsHost) createA2AClients() error {
 }
 
 // Check if the host has a RAG server connected
-func (host ToolsHost) HasRagServer() bool {
+func (host *ToolsHost) HasRagServer() bool {
 	return host.ragServerName != ""
 }
 func (host *ToolsHost) Close() error {
@@ -516,7 +565,7 @@ func (host *ToolsHost) loadA2ATools() error {
 	return nil
 }
 
-func (host ToolsHost) callTool(serverName string, toolName string, toolArgs map[string]interface{}, ctx context.Context) ToolCallResult {
+func (host *ToolsHost) callTool(serverName string, toolName string, toolArgs map[string]interface{}, ctx context.Context) ToolCallResult {
 	if host.isMCPServer(serverName) {
 		return host.callMCPTool(serverName, toolName, toolArgs, ctx)
 	}
@@ -528,12 +577,34 @@ func (host ToolsHost) callTool(serverName string, toolName string, toolArgs map[
 			Error: fmt.Errorf("A2A server %s not found", serverName),
 		}
 	}
+	if host.isReverseMCPServer(serverName) {
+		return host.callReverseMCPTool(serverName, toolName, toolArgs, ctx)
+	}
 	return ToolCallResult{
-		Error: fmt.Errorf("server %s is not a valid MCP or A2A server", serverName),
+		Error: fmt.Errorf("server %s is not a valid MCP, A2A, or reverse MCP server", serverName),
 	}
 }
 
-func (host ToolsHost) callMCPTool(serverName string, toolName string, toolArgs map[string]interface{}, ctx context.Context) ToolCallResult {
+// callReverseMCPTool calls a tool on a reverse MCP connected server
+func (host *ToolsHost) callReverseMCPTool(serverName string, toolName string, toolArgs map[string]interface{}, ctx context.Context) ToolCallResult {
+	if host.reverseMCPClient == nil {
+		return ToolCallResult{
+			Error: fmt.Errorf("reverse MCP client not configured"),
+		}
+	}
+
+	host.logger.Printf("Calling tool %s on reverse MCP server %s", toolName, serverName)
+
+	result, err := host.reverseMCPClient.CallTool(serverName, toolName, toolArgs, ctx)
+	if err != nil {
+		return ToolCallResult{
+			Error: fmt.Errorf("failed to call reverse MCP tool: %w", err),
+		}
+	}
+	return result
+}
+
+func (host *ToolsHost) callMCPTool(serverName string, toolName string, toolArgs map[string]interface{}, ctx context.Context) ToolCallResult {
 	mcpClient, ok := host.mcpClients[serverName]
 	if !ok {
 		return ToolCallResult{
@@ -604,7 +675,7 @@ func (host ToolsHost) callMCPTool(serverName string, toolName string, toolArgs m
 	}
 }
 
-func (host ToolsHost) getServersInfo() []ServerInfo {
+func (host *ToolsHost) getServersInfo() []ServerInfo {
 	var servers []ServerInfo
 	for name, server := range host.config {
 		switch server.Config.(type) {
@@ -652,15 +723,44 @@ func (host ToolsHost) getServersInfo() []ServerInfo {
 			host.logger.Printf("Unknown server type %T", server)
 		}
 	}
+
+	// Add reverse MCP servers
+	if host.reverseMCPClient != nil {
+		allTools := host.reverseMCPClient.GetAllTools()
+		for serverName, tools := range allTools {
+			toolInfos := make([]ServerToolInfo, len(tools))
+			for i, tool := range tools {
+				toolInfos[i] = ServerToolInfo{
+					Name:        tool.Name,
+					Description: tool.Description,
+				}
+			}
+			servers = append(servers, ServerInfo{
+				Name:      serverName,
+				Transport: transportReverseMCP,
+				Tools:     toolInfos,
+			})
+		}
+	}
+
 	return servers
 }
 
-func (host ToolsHost) getToolsInfo() []ServerInfo {
+func (host *ToolsHost) getToolsInfo() []ServerInfo {
 	servers := host.getServersInfo()
 	for i, server := range servers {
-		var toolsResult *mcp.ListToolsResult
+		// Skip servers that don't use MCP clients (reverse MCP, A2A, internal)
+		// These already have their tools populated in getServersInfo()
+		if server.IsReverseMCP() || server.IsA2A() || server.Transport == transportInternal {
+			continue
+		}
 
 		mcpClient := host.mcpClients[server.Name]
+		if mcpClient == nil {
+			servers[i].Err = fmt.Errorf("no MCP client available")
+			continue
+		}
+
 		ctx, cancel := context.WithTimeout(
 			context.Background(),
 			10*time.Second,
@@ -695,7 +795,7 @@ func (host ToolsHost) getToolsInfo() []ServerInfo {
 
 // if there is a memory MCP server, then it should be used. Send the messages to it
 // this is async, so the messages are not sent immediately
-func (host ToolsHost) Remember(role string, content history.ContentBlock, ctx context.Context) {
+func (host *ToolsHost) Remember(role string, content history.ContentBlock, ctx context.Context) {
 	if host.memoryServerName == "" {
 		return
 	}
@@ -727,7 +827,7 @@ func (host ToolsHost) Remember(role string, content history.ContentBlock, ctx co
 }
 
 // requests the memory server to recall the messages
-func (host ToolsHost) Recall(ctx context.Context, prompt string) (string, error) {
+func (host *ToolsHost) Recall(ctx context.Context, prompt string) (string, error) {
 	if host.memoryServerName == "" {
 		return "", nil
 	}
@@ -759,7 +859,7 @@ func (host ToolsHost) Recall(ctx context.Context, prompt string) (string, error)
 }
 
 // requests the memory server to recall the messages
-func (host ToolsHost) GetRAGContext(ctx context.Context, prompt string) ([]string, error) {
+func (host *ToolsHost) GetRAGContext(ctx context.Context, prompt string) ([]string, error) {
 	if host.ragServerName == "" {
 		return []string{}, nil
 	}
