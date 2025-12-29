@@ -170,13 +170,24 @@ func (p *Provider) CreateMessage(
 	}
 
 	// Make the API call
-	resp, err := p.client.CreateChatCompletion(ctx, CreateRequest{
-		Model:       p.model,
-		Messages:    openaiMessages,
-		Tools:       openaiTools,
-		MaxTokens:   4096,
-		Temperature: 0.7,
-	})
+	req := CreateRequest{
+		Model:    p.model,
+		Messages: openaiMessages,
+		Tools:    openaiTools,
+	}
+
+	// Use max_completion_tokens for newer models (o1, o3, etc.) that don't support max_tokens
+	maxTokens := 4096
+	if p.isReasoningModel() {
+		req.MaxCompletionTokens = &maxTokens
+		// Temperature is not supported for reasoning models
+	} else {
+		req.MaxTokens = &maxTokens
+		temp := float32(0.7)
+		req.Temperature = &temp
+	}
+
+	resp, err := p.client.CreateChatCompletion(ctx, req)
 	if err != nil {
 		return nil, err
 	}
@@ -194,6 +205,16 @@ func (p *Provider) SupportsTools() bool {
 
 func (p *Provider) Name() string {
 	return "openai"
+}
+
+// isNewAPIModel returns true if the model requires max_completion_tokens instead of max_tokens
+// This includes reasoning models (o1, o3) and newer GPT models (gpt-5+)
+func (p *Provider) isReasoningModel() bool {
+	model := strings.ToLower(p.model)
+	// o1, o1-mini, o1-preview, o3, o3-mini, gpt-5, gpt-5-mini, etc.
+	return strings.HasPrefix(model, "o1") ||
+		strings.HasPrefix(model, "o3") ||
+		strings.HasPrefix(model, "gpt-5")
 }
 
 func (p *Provider) SetLogger(logger *log.Logger) {
