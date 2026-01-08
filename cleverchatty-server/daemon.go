@@ -15,7 +15,6 @@ import (
 )
 
 const (
-	version        = "0.1.0"
 	configFileName = "cleverchatty_config.json"
 	pidFileName    = "cleverchatty-server.pid"
 )
@@ -25,7 +24,7 @@ var pidFilePath string
 
 var rootCmd = &cobra.Command{
 	Use:   "cleverchatty-server",
-	Short: "Universal AI assistant server. Version: " + version,
+	Short: "Universal AI assistant server. Version: " + cleverchatty.ThisAppVersion,
 	Long: `cleverchatty-server is a server tool for running a universal AI assistant. 
 	It can be run as a daemon to handle requests and manage AI interactions.
 	It supports:
@@ -79,7 +78,7 @@ var versionCmd = &cobra.Command{
 	Short: "Show version information",
 	Long:  `Display the version information of the cleverchatty server.`,
 	Run: func(cmd *cobra.Command, args []string) {
-		fmt.Printf("cleverchatty-server version %s\n", version)
+		fmt.Printf("cleverchatty-server version %s\n", cleverchatty.ThisAppVersion)
 		os.Exit(0)
 	},
 }
@@ -225,7 +224,43 @@ func runServer() error {
 		logger.Println("A2A server started successfully.")
 	}
 
+	// Initialize Reverse MCP connector if enabled
+	var reverseMCPConnector *ReverseMCPConnector
+	reverseMCPConnector = nil
+
+	if config.ReverseMCPListenerConfig.Enabled {
+		reverseMCPConnector = NewReverseMCPConnector(
+			&config.ReverseMCPListenerConfig,
+			config.ToolsServers,
+			logger,
+		)
+
+		// Set the reverse MCP connector as the client for session manager
+		// This allows sessions to access tools from reverse-connected MCP servers
+		sessions_manager.SetReverseMCPClient(reverseMCPConnector)
+
+		err = reverseMCPConnector.Start()
+		if err != nil {
+			if a2aServer != nil {
+				a2aServer.Stop()
+			}
+			commonContextCancel()
+			return fmt.Errorf("failed to start Reverse MCP connector: %v", err)
+		}
+		logger.Println("Reverse MCP connector started successfully.")
+	}
+
 	shutDown := func() {
+		if reverseMCPConnector != nil {
+			logger.Println("Stopping Reverse MCP connector...")
+			err := reverseMCPConnector.Stop()
+			if err != nil {
+				logger.Printf("Error stopping Reverse MCP connector: %v", err)
+			} else {
+				logger.Println("Reverse MCP connector stopped successfully.")
+			}
+			reverseMCPConnector = nil
+		}
 		if a2aServer != nil {
 			logger.Println("Stopping A2A server...")
 			err := a2aServer.Stop()
@@ -274,8 +309,8 @@ func loadConfigAndLogger() (config *cleverchatty.CleverChattyConfig, logger *log
 	}
 
 	// confirm there is at least one server to run
-	if !config.A2AServerConfig.Enabled {
-		err = fmt.Errorf("no any kind of server configured. It must be A2A (or other in future)")
+	if !config.A2AServerConfig.Enabled && !config.ReverseMCPListenerConfig.Enabled {
+		err = fmt.Errorf("no any kind of server configured. It must be A2A or Reverse MCP (or other in future)")
 		return
 	}
 	logger, err = cleverchatty.InitLogger(config.LogFilePath, config.DebugMode)

@@ -6,3 +6,6 @@ tests/*
 
 cleverchatty-cli/cleverchatty-cli
 cleverchatty-server/cleverchatty-server
+
+dev_tools/listener_verify/listener_verify
+dev_tools/reverse_mcp_server/reverse_mcp_server

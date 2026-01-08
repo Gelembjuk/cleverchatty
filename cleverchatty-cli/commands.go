@@ -52,7 +52,14 @@ func handleSlashCommandAsClient(prompt string, a2aClient a2aclient.A2AClient, ct
 		return false, nil
 	}
 
-	switch strings.ToLower(strings.TrimSpace(prompt)) {
+	cleanPrompt := strings.ToLower(strings.TrimSpace(prompt))
+
+	if cleanPrompt == "/servers" || cleanPrompt == "/tools" || cleanPrompt == "/history" {
+		// These commands should be processed on the server side
+		return false, nil
+	}
+
+	switch cleanPrompt {
 	case "/help":
 		handleHelpCommand()
 		return true, nil

@@ -97,6 +97,13 @@ func (assistant *CleverChatty) WithAgentID(agentID string) {
 	assistant.config.AgentID = agentID
 }
 
+// SetReverseMCPClient sets the reverse MCP client for dynamic tool registration
+func (assistant *CleverChatty) SetReverseMCPClient(client ReverseMCPClient) {
+	if assistant.toolsHost != nil {
+		assistant.toolsHost.SetReverseMCPClient(client)
+	}
+}
+
 // Add new function to create provider
 func (assistant CleverChatty) createProvider(ctx context.Context, modelString string) (llm.Provider, error) {
 	parts := strings.SplitN(modelString, ":", 2)

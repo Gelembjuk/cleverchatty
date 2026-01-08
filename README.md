@@ -39,6 +39,8 @@ cleverchatty-server start --directory "../agent-filesystem"
 
 The `--directory` option specifies the directory where the server configuration file is stored. This directory becomes a work directory for the server, and it is used to store logs and other files related to the server's operation. For example, MCP servers for STDIO can be stored there too.
 
+The directory has to contain a valid configuration file named `cleverchatty_config.json`. See [Configuration](docs/Config.md) for more details on how to configure the server. The name of the file can be changed with the `--config` option.
+
 To stop the server, you can use the command:
 
 ```bash

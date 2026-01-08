@@ -122,7 +122,7 @@ func (assistant *CleverChatty) injectRAGContext(prompt string) {
 			assistant.context,
 			prompt,
 			[]llm.Message{&instructionMessage},
-			assistant.toolsHost.tools,
+			assistant.toolsHost.GetAllToolsForLLM(),
 		)
 		if err == nil {
 			// if we got a response, use it as the prompt for RAG context
@@ -160,6 +160,17 @@ func (assistant *CleverChatty) Prompt(prompt string) (string, error) {
 		return "", nil
 	}
 
+	// Check for slash commands first
+	handled, response, err := assistant.handleSlashCommand(prompt)
+	if handled {
+		if err != nil {
+			return "", err
+		}
+		// Call the response callback so streaming clients receive the response
+		assistant.Callbacks.CallResponseReceived(response)
+		return response, nil
+	}
+
 	if len(assistant.messages) == 0 {
 		// append system instruction to the history
 
@@ -195,7 +206,7 @@ func (assistant *CleverChatty) Prompt(prompt string) (string, error) {
 	// time to refresh the memory
 	assistant.addToMemory("user", prompt)
 
-	response, err := assistant.processPrompt(prompt)
+	response, err = assistant.processPrompt(prompt)
 	if err != nil {
 		return "", err
 	}
@@ -233,7 +244,7 @@ func (assistant *CleverChatty) processPrompt(prompt string) (string, error) {
 				assistant.context,
 				prompt,
 				llmMessages,
-				assistant.toolsHost.tools,
+				assistant.toolsHost.GetAllToolsForLLM(),
 			)
 			resultCh <- result{message: msg, err: err}
 		}()

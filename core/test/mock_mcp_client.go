@@ -116,7 +116,7 @@ func (m *MockMCPClient) CallTool(
 	if argStr, ok := args["argument"].(string); ok && argStr == "return_empty_text" {
 		return &mcp.CallToolResult{
 			Result: mcp.Result{
-				Meta: map[string]interface{}{},
+				Meta: nil,
 			},
 			Content: []mcp.Content{
 				mcp.TextContent{
@@ -129,7 +129,7 @@ func (m *MockMCPClient) CallTool(
 	argStr, _ := args["argument"].(string)
 	return &mcp.CallToolResult{
 		Result: mcp.Result{
-			Meta: map[string]interface{}{},
+			Meta: nil,
 		},
 		Content: []mcp.Content{
 			mcp.TextContent{

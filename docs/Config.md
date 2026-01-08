@@ -1,6 +1,6 @@
 # Configuration of CleverChatty server and client.
 
-Same confiog is used for both server and client. The server could require some more sections.
+Same confiog is used for both server and client. The server could require some more sections. The default name for the config file is `cleverchatty_config.json`.
 
 ```json
 {
@@ -37,6 +37,10 @@ Same confiog is used for both server and client. The server could require some m
                 "agent_id": "{CLIENT_AGENT_ID}",
                 "token": "SECRET_TOKEN"
             }
+        },
+        "my_remote_worker": {
+            "transport": "reverse_mcp",
+            "auth_token": "secret123"
         }
     },
     "rag_settings": {
@@ -46,6 +50,13 @@ Same confiog is used for both server and client. The server could require some m
     },
     "server":{
         "session_timeout": 3600
+    },
+    "reverse_mcp_settings": {
+        "enabled": true,
+        "listen_host": ":9090",
+        "tls": {
+            "enabled": false
+        }
     },
     "a2a_settings":{
         "enabled":true,
@@ -98,6 +109,25 @@ Supported providers are:
 - `anthropic` - Anthropic models
 - `openai` - OpenAI models
 - `google` - Google models
+
+## "reverse_mcp_settings"
+
+Configures the Reverse MCP Connector listener settings.
+
+- `enabled`: Boolean, enables the WebSocket listener.
+- `listen_host`: Port/Interface to listen on (e.g. `:9090`).
+- `tls`: TLS configuration object.
+
+See [ReverseMCP.md](ReverseMCP.md) for full details.
+
+## "tools_servers"
+
+Map of tools servers. Each key is the unique name of the server.
+
+For **Reverse MCP** servers:
+- `transport`: Set to `"reverse_mcp"`.
+- `auth_token`: The token the remote server must present.
+
 
 In case of Ollama models, the model name can include the version, e.g. `ollama:llama2:7b`. And it is presumed Ollama is installed, running and the model is available.
 
