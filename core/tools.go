@@ -719,27 +719,26 @@ func (host *ToolsHost) getServersInfo() []ServerInfo {
 				Transport: transportInternal,
 				Command:   internalServer.Kind,
 			})
-		default:
-			host.logger.Printf("Unknown server type %T", server)
-		}
-	}
-
-	// Add reverse MCP servers
-	if host.reverseMCPClient != nil {
-		allTools := host.reverseMCPClient.GetAllTools()
-		for serverName, tools := range allTools {
-			toolInfos := make([]ServerToolInfo, len(tools))
-			for i, tool := range tools {
-				toolInfos[i] = ServerToolInfo{
-					Name:        tool.Name,
-					Description: tool.Description,
+		case ReverseMCPServerConfig:
+			if host.reverseMCPClient != nil {
+				tools := host.reverseMCPClient.GetTools(name)
+				if len(tools) > 0 {
+					toolInfos := make([]ServerToolInfo, len(tools))
+					for i, tool := range tools {
+						toolInfos[i] = ServerToolInfo{
+							Name:        tool.Name,
+							Description: tool.Description,
+						}
+					}
+					servers = append(servers, ServerInfo{
+						Name:      name,
+						Transport: transportReverseMCP,
+						Tools:     toolInfos,
+					})
 				}
 			}
-			servers = append(servers, ServerInfo{
-				Name:      serverName,
-				Transport: transportReverseMCP,
-				Tools:     toolInfos,
-			})
+		default:
+			host.logger.Printf("Unknown server type %T", server)
 		}
 	}
 

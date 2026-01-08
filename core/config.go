@@ -95,6 +95,16 @@ func (s A2AToolsServerConfig) GetType() string {
 	return transportA2A
 }
 
+// ReverseMCPServerConfig defines the configuration for a reverse MCP server connection
+// This is used when a remote MCP server connects to us via WebSocket
+type ReverseMCPServerConfig struct {
+	AuthToken string `json:"auth_token"` // Authentication token for this specific server
+}
+
+func (s ReverseMCPServerConfig) GetType() string {
+	return transportReverseMCP
+}
+
 type InternalServerConfig struct {
 	Kind string `json:"kind"`
 }
@@ -128,29 +138,36 @@ type A2AServerConfig struct {
 	ChatSkillDescription string `json:"chat_skill_description,omitempty"`
 }
 
-// ReverseMCPServerConfig defines the configuration for the reverse MCP server
-// This server accepts incoming MCP connections from remote MCP servers
-type ReverseMCPServerConfig struct {
-	Enabled    bool     `json:"enabled"`
-	ListenHost string   `json:"listen_host"`
-	AuthTokens []string `json:"auth_tokens,omitempty"` // List of valid auth tokens for authentication
+// ReverseMCPListenerConfig defines the configuration for the reverse MCP listener
+// This server accepts incoming MCP connections from remote MCP servers via WebSocket
+type ReverseMCPListenerConfig struct {
+	Enabled    bool      `json:"enabled"`
+	ListenHost string    `json:"listen_host"`
+	TLS        TLSConfig `json:"tls,omitempty"` // TLS configuration for secure connections
+}
+
+// TLSConfig defines TLS/SSL certificate configuration
+type TLSConfig struct {
+	Enabled  bool   `json:"enabled"`
+	CertFile string `json:"cert_file,omitempty"` // Path to TLS certificate file
+	KeyFile  string `json:"key_file,omitempty"`  // Path to TLS private key file
 }
 
 type CleverChattyConfig struct {
-	AgentID                string                         `json:"agent_id"`
-	ServerConfig           ServerConfig                   `json:"server"`
-	LogFilePath            string                         `json:"log_file_path"`
-	DebugMode              bool                           `json:"debug_mode"`
-	MessageWindow          int                            `json:"message_window"`
-	Model                  string                         `json:"model"`
-	SystemInstruction      string                         `json:"system_instruction"`
-	Anthropic              AnthropicConfig                `json:"anthropic"`
-	OpenAI                 OpenAIConfig                   `json:"openai"`
-	Google                 GoogleConfig                   `json:"google"`
-	ToolsServers           map[string]ServerConfigWrapper `json:"tools_servers,omitempty"`
-	RAGConfig              RAGConfig                      `json:"rag_settings"`
-	A2AServerConfig        A2AServerConfig                `json:"a2a_settings"`
-	ReverseMCPServerConfig ReverseMCPServerConfig         `json:"reverse_mcp_settings"`
+	AgentID                  string                         `json:"agent_id"`
+	ServerConfig             ServerConfig                   `json:"server"`
+	LogFilePath              string                         `json:"log_file_path"`
+	DebugMode                bool                           `json:"debug_mode"`
+	MessageWindow            int                            `json:"message_window"`
+	Model                    string                         `json:"model"`
+	SystemInstruction        string                         `json:"system_instruction"`
+	Anthropic                AnthropicConfig                `json:"anthropic"`
+	OpenAI                   OpenAIConfig                   `json:"openai"`
+	Google                   GoogleConfig                   `json:"google"`
+	ToolsServers             map[string]ServerConfigWrapper `json:"tools_servers,omitempty"`
+	RAGConfig                RAGConfig                      `json:"rag_settings"`
+	A2AServerConfig          A2AServerConfig                `json:"a2a_settings"`
+	ReverseMCPListenerConfig ReverseMCPListenerConfig       `json:"reverse_mcp_settings"`
 }
 
 func CreateStandardConfigFile(configPath string) (*CleverChattyConfig, error) {
@@ -214,6 +231,7 @@ func (w *ServerConfigWrapper) UnmarshalJSON(data []byte) error {
 	var typeField struct {
 		Url       string `json:"url"`
 		Endpoint  string `json:"endpoint"`
+		AuthToken string `json:"auth_token"`
 		Transport string `json:"transport"`
 		Interface string `json:"interface"`
 		Disabled  bool   `json:"disabled"`
@@ -227,7 +245,14 @@ func (w *ServerConfigWrapper) UnmarshalJSON(data []byte) error {
 	w.Disabled = typeField.Disabled
 	w.Required = typeField.Required
 
-	if typeField.Url != "" {
+	if typeField.Transport == transportReverseMCP {
+		// Reverse MCP server - remote server connects to us
+		var reverseMCP ReverseMCPServerConfig
+		if err := json.Unmarshal(data, &reverseMCP); err != nil {
+			return err
+		}
+		w.Config = reverseMCP
+	} else if typeField.Url != "" {
 		if typeField.Transport == transportSSE {
 			// If the URL field is present, treat it as an SSE server
 			var sse SSEMCPServerConfig
@@ -281,6 +306,19 @@ func (w ServerConfigWrapper) isMCPServer() bool {
 
 func (w ServerConfigWrapper) isA2AServer() bool {
 	return w.Config.GetType() == transportA2A
+}
+
+func (w ServerConfigWrapper) IsReverseMCPServer() bool {
+	return w.Config.GetType() == transportReverseMCP
+}
+
+// GetReverseMCPAuthToken returns the auth token for a reverse MCP server config
+// Returns empty string if the server is not a reverse MCP server or has no token
+func (w ServerConfigWrapper) GetReverseMCPAuthToken() string {
+	if cfg, ok := w.Config.(ReverseMCPServerConfig); ok {
+		return cfg.AuthToken
+	}
+	return ""
 }
 
 func InitLogger(logFilePath string, debugMMode bool) (*log.Logger, error) {

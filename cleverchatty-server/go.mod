@@ -5,6 +5,7 @@ go 1.24.1
 require (
 	github.com/gelembjuk/cleverchatty/core v0.0.0-20250704155525-73046dff975e
 	github.com/google/uuid v1.6.0
+	github.com/mark3labs/mcp-go v0.43.2
 	github.com/spf13/cobra v1.9.1
 	trpc.group/trpc-go/trpc-a2a-go v0.2.0
 )
@@ -28,6 +29,7 @@ require (
 	github.com/google/s2a-go v0.1.9 // indirect
 	github.com/googleapis/enterprise-certificate-proxy v0.3.6 // indirect
 	github.com/googleapis/gax-go/v2 v2.14.1 // indirect
+	github.com/gorilla/websocket v1.5.3 // indirect
 	github.com/inconshreveable/mousetrap v1.1.0 // indirect
 	github.com/invopop/jsonschema v0.13.0 // indirect
 	github.com/lestrrat-go/blackmagic v1.0.2 // indirect
@@ -37,7 +39,6 @@ require (
 	github.com/lestrrat-go/jwx/v2 v2.1.4 // indirect
 	github.com/lestrrat-go/option v1.0.1 // indirect
 	github.com/mailru/easyjson v0.7.7 // indirect
-	github.com/mark3labs/mcp-go v0.43.2 // indirect
 	github.com/ollama/ollama v0.5.1 // indirect
 	github.com/segmentio/asm v1.2.0 // indirect
 	github.com/spf13/cast v1.7.1 // indirect
