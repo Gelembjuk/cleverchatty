@@ -15,7 +15,6 @@ import (
 )
 
 const (
-	version        = "0.1.0"
 	configFileName = "cleverchatty_config.json"
 	pidFileName    = "cleverchatty-server.pid"
 )
@@ -25,7 +24,7 @@ var pidFilePath string
 
 var rootCmd = &cobra.Command{
 	Use:   "cleverchatty-server",
-	Short: "Universal AI assistant server. Version: " + version,
+	Short: "Universal AI assistant server. Version: " + cleverchatty.ThisAppVersion,
 	Long: `cleverchatty-server is a server tool for running a universal AI assistant. 
 	It can be run as a daemon to handle requests and manage AI interactions.
 	It supports:
@@ -79,7 +78,7 @@ var versionCmd = &cobra.Command{
 	Short: "Show version information",
 	Long:  `Display the version information of the cleverchatty server.`,
 	Run: func(cmd *cobra.Command, args []string) {
-		fmt.Printf("cleverchatty-server version %s\n", version)
+		fmt.Printf("cleverchatty-server version %s\n", cleverchatty.ThisAppVersion)
 		os.Exit(0)
 	},
 }
