@@ -1,6 +1,6 @@
 # Configuration of CleverChatty server and client.
 
-Same confiog is used for both server and client. The server could require some more sections.
+Same confiog is used for both server and client. The server could require some more sections. The default name for the config file is `cleverchatty_config.json`.
 
 ```json
 {
