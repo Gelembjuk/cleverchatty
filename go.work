@@ -1,0 +1,7 @@
+go 1.24.3
+
+use (
+	./cleverchatty-cli
+	./cleverchatty-server
+	./core
+)
