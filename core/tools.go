@@ -227,13 +227,29 @@ func (host *ToolsHost) mcpToolsToAnthropicTools(
 	for i, tool := range mcpTools {
 		namespacedName := fmt.Sprintf("%s__%s", serverName, tool.Name)
 
+		// Ensure schema type is "object" and properties is not nil
+		schemaType := tool.InputSchema.Type
+		if schemaType == "" {
+			schemaType = "object"
+		}
+
+		properties := tool.InputSchema.Properties
+		if properties == nil {
+			properties = map[string]interface{}{}
+		}
+
+		required := tool.InputSchema.Required
+		if required == nil {
+			required = []string{}
+		}
+
 		anthropicTools[i] = llm.Tool{
 			Name:        namespacedName,
 			Description: tool.Description,
 			InputSchema: llm.Schema{
-				Type:       tool.InputSchema.Type,
-				Properties: tool.InputSchema.Properties,
-				Required:   tool.InputSchema.Required,
+				Type:       schemaType,
+				Properties: properties,
+				Required:   required,
 			},
 		}
 	}
@@ -375,6 +391,11 @@ func (host *ToolsHost) createMCPClients() error {
 				err,
 			)
 		}
+
+		client.OnNotification(func(notification mcp.JSONRPCNotification) {
+			fmt.Printf("Notification received from server %s: %+v\n", name, notification)
+			host.logger.Printf("Notification received from server %s: %+v\n", name, notification)
+		})
 
 		clients[name] = client
 
