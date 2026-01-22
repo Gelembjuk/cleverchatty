@@ -4,4 +4,9 @@ use (
 	./cleverchatty-cli
 	./cleverchatty-server
 	./core
+	./dev_tools/notifications_client/stdio-client
+	./dev_tools/notifications_client/stdio-server
+	./dev_tools/notifications_client/http-client
+	./dev_tools/notifications_client/http-server
+	./dev_tools/notifications_client/shared
 )

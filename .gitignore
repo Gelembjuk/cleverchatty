@@ -9,3 +9,13 @@ cleverchatty-server/cleverchatty-server
 
 dev_tools/listener_verify/listener_verify
 dev_tools/reverse_mcp_server/reverse_mcp_server
+dev_tools/notifications_client/stdio-server/stdio-server
+dev_tools/notifications_client/stdio-server/server
+dev_tools/notifications_client/stdio-server/client
+dev_tools/notifications_client/stdio-client/stdio-client
+dev_tools/notifications_client/stdio-client/client
+dev_tools/notifications_client/http-server/http-server
+dev_tools/notifications_client/http-client/http-client
+
+.claude
+.claude/*
