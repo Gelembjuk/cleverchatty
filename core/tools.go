@@ -326,6 +326,7 @@ func (host *ToolsHost) createMCPClients() error {
 				}
 				options = append(options, transport.WithHTTPHeaders(headers))
 			}
+			options = append(options, transport.WithContinuousListening())
 
 			client, err = mcpclient.NewStreamableHttpClient(
 				httpConfig.Url,
@@ -393,7 +394,6 @@ func (host *ToolsHost) createMCPClients() error {
 		}
 
 		client.OnNotification(func(notification mcp.JSONRPCNotification) {
-			fmt.Printf("Notification received from server %s: %+v\n", name, notification)
 			host.logger.Printf("Notification received from server %s: %+v\n", name, notification)
 		})
 
