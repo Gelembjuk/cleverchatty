@@ -4,13 +4,15 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log"
 	"os"
 	"path/filepath"
 	"time"
 
 	markdown "github.com/MichaelMure/go-term-markdown"
+	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/huh"
-	"github.com/charmbracelet/log"
+	charmlog "github.com/charmbracelet/log"
 	cleverchatty "github.com/gelembjuk/cleverchatty/core"
 	"github.com/google/uuid"
 	"github.com/spf13/cobra"
@@ -40,6 +42,54 @@ var (
 	actionChannel         = make(chan bool)
 	actionCanceledChannel = make(chan bool)
 )
+
+var (
+	tuiContext       context.Context
+	tuiConfig        *cleverchatty.CleverChattyConfig
+	tuiCleverChatty  *cleverchatty.CleverChatty
+	useTUIMode       bool
+)
+
+func getTUICleverChatty() *cleverchatty.CleverChatty {
+	return tuiCleverChatty
+}
+
+// tuiPrint sends output to TUI if in TUI mode, otherwise prints to stdout
+func tuiPrint(msg string) {
+	if useTUIMode && program != nil {
+		tuiSendChat(msg)
+	} else {
+		fmt.Print(msg)
+	}
+}
+
+// initCleverChattyFunc initializes the CleverChatty instance for TUI mode
+func initCleverChattyFunc() tea.Msg {
+	// Create a custom logger that writes to the TUI
+	customLogger := log.New(&tuiLogWriter{}, "", log.LstdFlags)
+	if tuiConfig.DebugMode {
+		customLogger.SetFlags(log.LstdFlags | log.Lshortfile)
+	}
+
+	// Create CleverChatty with custom logger
+	cleverChattyObject, err := cleverchatty.GetCleverChattyWithLogger(*tuiConfig, tuiContext, customLogger)
+	if err != nil {
+		return initCompleteMsg{cleverChatty: nil, err: err}
+	}
+
+	err = cleverChattyObject.Init()
+	if err != nil {
+		return initCompleteMsg{cleverChatty: nil, err: err}
+	}
+
+	// Set callbacks to use TUI
+	cleverChattyObject.Callbacks = composeCallbacks(true)
+
+	// Store globally
+	tuiCleverChatty = cleverChattyObject
+
+	return initCompleteMsg{cleverChatty: cleverChattyObject, err: nil}
+}
 
 var rootCmd = &cobra.Command{
 	Use:   "cleverchatty-cli",
@@ -201,45 +251,73 @@ func run(ctx context.Context) error {
 	}
 	return nil
 }
-func composeCallbacks() cleverchatty.UICallbacks {
+func composeCallbacks(useTUI bool) cleverchatty.UICallbacks {
 	callbacks := cleverchatty.UICallbacks{}
 
 	callbacks.SetStartedPromptProcessing(func(prompt string) error {
-		fmt.Printf("\n%s%s\n\n", promptStyle.Render("You: "), markdown.Render(prompt, 80, 6))
+		if useTUI {
+			// Add separator and spacing before the message
+			separator := separatorStyle.Render("─────────────────────────────────────────────────")
+			userLabel := promptStyle.Render("You:")
+			tuiSendChat(fmt.Sprintf("\n%s\n%s\n%s\n", separator, userLabel, prompt))
+		} else {
+			fmt.Printf("\n%s%s\n\n", promptStyle.Render("You: "), markdown.Render(prompt, 80, 6))
+		}
 		return nil
 	})
 	callbacks.SetStartedThinking(func() error {
-		showSpinner("💭  Thinking...")
+		if useTUI {
+			tuiSendSpinner("💭  Thinking...")
+		} else {
+			showSpinner("💭  Thinking...")
+		}
 		return nil
 	})
 	callbacks.SetMemoryRetrievalStarted(func() error {
-		showSpinner("🕰️  Recalling...")
+		if useTUI {
+			tuiSendSpinner("🕰️  Recalling...")
+		} else {
+			showSpinner("🕰️  Recalling...")
+		}
 		return nil
 	})
 	callbacks.SetRAGRetrievalStarted(func() error {
-		showSpinner("🗃️  Searching knowledge database ...")
-		return nil
-	})
-	callbacks.SetMemoryRetrievalStarted(func() error {
-		showSpinner("🕰️  Recalling...")
-		return nil
-	})
-	callbacks.SetRAGRetrievalStarted(func() error {
-		showSpinner("🗃️  Searching knowledge database ...")
+		if useTUI {
+			tuiSendSpinner("🗃️  Searching knowledge database ...")
+		} else {
+			showSpinner("🗃️  Searching knowledge database ...")
+		}
 		return nil
 	})
 	callbacks.SetToolCalling(func(toolName string) error {
-		showSpinner("🔧 Using tool: " + toolName)
+		if useTUI {
+			tuiSendSpinner("🔧 Using tool: " + toolName)
+		} else {
+			showSpinner("🔧 Using tool: " + toolName)
+		}
 		return nil
 	})
 	callbacks.SetToolCallFailed(func(toolName string, err error) error {
-		releaseActionSpinner()
-		fmt.Printf("\n%s\n", errorStyle.Render("Error using tool: "+toolName))
+		if useTUI {
+			tuiClearSpinner()
+			tuiSendChat("\n" + errorStyle.Render("Error using tool: "+toolName) + "\n")
+		} else {
+			releaseActionSpinner()
+			fmt.Printf("\n%s\n", errorStyle.Render("Error using tool: "+toolName))
+		}
 		return nil
 	})
 	callbacks.SetResponseReceived(func(response string) error {
-		releaseActionSpinner()
-		fmt.Printf("\n%s%s\n\n", responseStyle.Render("Assistant: "), markdown.Render(response, 80, 6))
+		if useTUI {
+			tuiClearSpinner()
+			// Add separator and spacing before the message
+			separator := separatorStyle.Render("─────────────────────────────────────────────────")
+			assistantLabel := responseStyle.Render("Assistant:")
+			tuiSendChat(fmt.Sprintf("\n%s\n%s\n%s\n", separator, assistantLabel, response))
+		} else {
+			releaseActionSpinner()
+			fmt.Printf("\n%s%s\n\n", responseStyle.Render("Assistant: "), markdown.Render(response, 80, 6))
+		}
 		return nil
 	})
 
@@ -250,26 +328,99 @@ func runAsStandalone(ctx context.Context) error {
 	if err != nil {
 		return fmt.Errorf("error loading config: %v", err)
 	}
-	cleverChattyObject, err := cleverchatty.GetCleverChatty(*config, ctx)
 
-	if err != nil {
-		return fmt.Errorf("error creating assistant: %v", err)
+	// Check if logs should be shown (when LogFilePath is "stdout")
+	showLogs := config.LogFilePath == "stdout"
+
+	var cleverChattyObject *cleverchatty.CleverChatty
+
+	// Use TUI if logs are enabled, otherwise use the simple form input
+	if showLogs {
+		// For TUI mode, we need to create a custom logger
+		return runWithTUI(ctx, config)
+	} else {
+		cleverChattyObject, err = cleverchatty.GetCleverChatty(*config, ctx)
+		if err != nil {
+			return fmt.Errorf("error creating assistant: %v", err)
+		}
+
+		err = cleverChattyObject.Init()
+		if err != nil {
+			return fmt.Errorf("error initializing assistant: %v", err)
+		}
+
+		defer func() {
+			charmlog.Info("Shutting down CleverChatty core...")
+			cleverChattyObject.Finish()
+		}()
+
+		return runWithSimpleInput(ctx, cleverChattyObject)
+	}
+}
+
+func runWithTUI(ctx context.Context, config *cleverchatty.CleverChattyConfig) error {
+	if err := updateRenderer(); err != nil {
+		return fmt.Errorf("error initializing renderer: %v", err)
 	}
 
-	err = cleverChattyObject.Init()
-	if err != nil {
-		return fmt.Errorf("error initializing assistant: %v", err)
+	// Store config and context for initialization
+	tuiContext = ctx
+	tuiConfig = config
+	useTUIMode = true
+
+	// Create prompt callback
+	promptCallback := func(prompt string) error {
+		cleverChattyObject := getTUICleverChatty()
+		if cleverChattyObject == nil {
+			return fmt.Errorf("CleverChatty not initialized")
+		}
+		// Handle slash commands
+		handled, err := handleSlashCommand(prompt, *cleverChattyObject)
+		if err != nil {
+			tuiSendError(err)
+			return err
+		}
+		if handled {
+			return nil
+		}
+
+		_, err = cleverChattyObject.Prompt(prompt)
+		if err != nil {
+			tuiSendError(err)
+			return err
+		}
+		return nil
 	}
 
-	defer func() {
+	// Create TUI model
+	model := newTUIModel(true, promptCallback)
+	program = tea.NewProgram(model, tea.WithAltScreen())
 
-		log.Info("Shutting down CleverChatty core...")
+	// Run the program (initialization will happen after TUI starts)
+	finalModel, err := program.Run()
 
-		cleverChattyObject.Finish()
+	// Cleanup
+	useTUIMode = false
+	if tuiCleverChatty != nil {
+		tuiCleverChatty.Finish()
+	}
 
-	}()
+	if err != nil {
+		return fmt.Errorf("error running TUI: %v", err)
+	}
 
-	cleverChattyObject.Callbacks = composeCallbacks()
+	// Additional cleanup check
+	if m, ok := finalModel.(tuiModel); ok && m.cleverChatty != nil {
+		if cc, ok := m.cleverChatty.(*cleverchatty.CleverChatty); ok && cc != tuiCleverChatty {
+			cc.Finish()
+		}
+	}
+
+	return nil
+}
+
+func runWithSimpleInput(ctx context.Context, cleverChattyObject *cleverchatty.CleverChatty) error {
+	cleverChattyObject.Callbacks = composeCallbacks(false)
 
 	if err := updateRenderer(); err != nil {
 		return fmt.Errorf("error initializing renderer: %v", err)
@@ -396,7 +547,7 @@ func runAsClient(ctx context.Context) error {
 		if err != nil {
 			return fmt.Errorf("error starting task stream: %v", err)
 		}
-		_, err = processA2AStreamEvents(ctx, streamChan, composeCallbacks())
+		_, err = processA2AStreamEvents(ctx, streamChan, composeCallbacks(false))
 		if err != nil {
 			return fmt.Errorf("error processing task stream events: %v", err)
 		}

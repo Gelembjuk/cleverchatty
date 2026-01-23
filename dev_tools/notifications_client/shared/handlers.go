@@ -82,8 +82,8 @@ func CreateTaskStatusHandler(taskManager *TaskManager) func(context.Context, mcp
 
 // ExecuteTask simulates task execution with progress updates and notifications
 func ExecuteTask(ctx context.Context, mcpServer *server.MCPServer, taskManager *TaskManager, taskID, title, category string) {
-	// Random duration between 2-6 seconds
-	totalDuration := time.Duration(2+rand.Intn(5)) * time.Second
+	// Random duration between 5-25 seconds
+	totalDuration := time.Duration(5+rand.Intn(20)) * time.Second
 	steps := int(totalDuration.Seconds())
 
 	fmt.Fprintf(os.Stderr, "[Task %s] Started: %s (category: %s, duration: %v)\n",
