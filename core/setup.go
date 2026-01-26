@@ -13,7 +13,6 @@ import (
 	"github.com/gelembjuk/cleverchatty/core/llm/ollama"
 	"github.com/gelembjuk/cleverchatty/core/llm/openai"
 	"github.com/gelembjuk/cleverchatty/core/test"
-	"github.com/mark3labs/mcp-go/mcp"
 )
 
 type CleverChatty struct {
@@ -105,10 +104,9 @@ func (assistant *CleverChatty) SetReverseMCPClient(client ReverseMCPClient) {
 	}
 }
 
-// Set notifications callback for all servers
-func (assistant *CleverChatty) SetNotificationCallback(
-	callback func(server string, notification mcp.JSONRPCNotification),
-) {
+// SetNotificationCallback sets a callback for notifications from all MCP servers.
+// The callback receives a unified Notification structure instead of the raw MCP notification.
+func (assistant *CleverChatty) SetNotificationCallback(callback NotificationCallback) {
 	assistant.toolsHost.SetNotificationCallback(callback)
 }
 

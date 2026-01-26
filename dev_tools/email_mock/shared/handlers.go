@@ -153,6 +153,7 @@ func StartEmailNotificationSender(ctx context.Context, mcpServer interface{}, em
 				// Broadcast notification to all connected clients
 				// Note: This method doesn't return an error, it silently skips if no clients
 				broadcaster.SendNotificationToAllClients("new_email", map[string]any{
+					"description": "New email received from " + email.From + " with subject: " + email.Subject,
 					"email_id": email.ID,
 					"from":     email.From,
 					"subject":  email.Subject,

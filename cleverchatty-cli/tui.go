@@ -8,7 +8,7 @@ import (
 	"github.com/charmbracelet/bubbles/viewport"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
-	"github.com/mark3labs/mcp-go/mcp"
+	cleverchatty "github.com/gelembjuk/cleverchatty/core"
 	"github.com/muesli/reflow/wordwrap"
 )
 
@@ -16,8 +16,7 @@ import (
 type chatMsg string
 type logMsg string
 type notificationMsg struct {
-	server       string
-	notification mcp.JSONRPCNotification
+	notification cleverchatty.Notification
 }
 type spinnerMsg string
 type clearSpinnerMsg struct{}
@@ -30,19 +29,19 @@ type initCompleteMsg struct {
 
 // TUI model
 type tuiModel struct {
-	chatViewport           viewport.Model
-	notificationsViewport  viewport.Model
-	input                  textarea.Model
-	showNotifications      bool
-	ready                  bool
-	initialized            bool
-	currentSpinner         string
-	width                  int
-	height                 int
-	chatContent            *strings.Builder
-	notificationsContent   *strings.Builder
-	promptCallback         func(string) error
-	cleverChatty           interface{}
+	chatViewport          viewport.Model
+	notificationsViewport viewport.Model
+	input                 textarea.Model
+	showNotifications     bool
+	ready                 bool
+	initialized           bool
+	currentSpinner        string
+	width                 int
+	height                int
+	chatContent           *strings.Builder
+	notificationsContent  *strings.Builder
+	promptCallback        func(string) error
+	cleverChatty          interface{}
 }
 
 func newTUIModel(showNotifications bool, promptCallback func(string) error) tuiModel {
@@ -231,21 +230,35 @@ func (m tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case notificationMsg:
 		if m.showNotifications {
-			// Format notification message
+			// Format notification message using the unified Notification structure
 			notifStyle := lipgloss.NewStyle().Foreground(tokyoYellow)
 			serverStyle := lipgloss.NewStyle().Foreground(tokyoCyan).Bold(true)
+			descStyle := lipgloss.NewStyle().Foreground(tokyoFg)
+			statusStyle := lipgloss.NewStyle().Foreground(tokyoGreen).Italic(true)
 
-			text := fmt.Sprintf("%s\n", serverStyle.Render("["+msg.server+"]"))
+			text := fmt.Sprintf("%s\n", serverStyle.Render("["+msg.notification.ServerName+"]"))
 
-			// Try to extract useful info from notification
+			// Display method
 			if msg.notification.Method != "" {
 				text += fmt.Sprintf("📢 %s\n", notifStyle.Render(msg.notification.Method))
 			}
-			if msg.notification.Params.AdditionalFields != nil {
-				for key, value := range msg.notification.Params.AdditionalFields {
-					text += fmt.Sprintf("  %s: %v\n", key, value)
-				}
+
+			// Display description
+			if msg.notification.Description != "" && msg.notification.Description != msg.notification.Method {
+				text += fmt.Sprintf("   %s\n", descStyle.Render(msg.notification.Description))
 			}
+
+			// Display monitoring and processing status if monitored
+			if msg.notification.IsMonitored() {
+				text += fmt.Sprintf("   %s\n", statusStyle.Render(fmt.Sprintf("[%s]", msg.notification.ProcessingStatus)))
+			}
+
+			// Display parameters
+			//if msg.notification.Params != nil && len(msg.notification.Params) > 0 {
+			//	for key, value := range msg.notification.Params {
+			//		text += fmt.Sprintf("  %s: %v\n", key, value)
+			//	}
+			//}
 			text += "\n"
 
 			// Wrap text to viewport width if ready
@@ -439,8 +452,8 @@ func tuiQuit() {
 	}
 }
 
-func tuiSendNotification(server string, notification mcp.JSONRPCNotification) {
+func tuiSendNotification(notification cleverchatty.Notification) {
 	if program != nil {
-		program.Send(notificationMsg{server: server, notification: notification})
+		program.Send(notificationMsg{notification: notification})
 	}
 }

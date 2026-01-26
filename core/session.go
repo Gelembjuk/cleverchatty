@@ -5,8 +5,6 @@ import (
 	"log"
 	"sync"
 	"time"
-
-	"github.com/mark3labs/mcp-go/mcp"
 )
 
 type Session struct {
@@ -22,7 +20,7 @@ type SessionManager struct {
 	context              context.Context
 	logger               *log.Logger
 	reverseMCPClient     ReverseMCPClient
-	notificationCallback func(server string, notification mcp.JSONRPCNotification)
+	notificationCallback NotificationCallback
 }
 
 func NewSessionManager(config *CleverChattyConfig, ctx context.Context, logger *log.Logger) *SessionManager {
@@ -39,8 +37,9 @@ func (sm *SessionManager) SetReverseMCPClient(client ReverseMCPClient) {
 	sm.reverseMCPClient = client
 }
 
-// SetNotificationCallback sets the callback for MCP notifications
-func (sm *SessionManager) SetNotificationCallback(callback func(server string, notification mcp.JSONRPCNotification)) {
+// SetNotificationCallback sets the callback for notifications from MCP servers.
+// The callback receives a unified Notification structure instead of the raw MCP notification.
+func (sm *SessionManager) SetNotificationCallback(callback NotificationCallback) {
 	sm.notificationCallback = callback
 }
 

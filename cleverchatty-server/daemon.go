@@ -11,7 +11,6 @@ import (
 	"syscall"
 
 	cleverchatty "github.com/gelembjuk/cleverchatty/core"
-	"github.com/mark3labs/mcp-go/mcp"
 	"github.com/spf13/cobra"
 )
 
@@ -224,17 +223,10 @@ func runServer() error {
 		}
 		logger.Println("A2A server started successfully.")
 
-		// Set notification callback to broadcast MCP notifications to A2A clients
-		sessions_manager.SetNotificationCallback(func(server string, notification mcp.JSONRPCNotification) {
-			// Extract notification details
-			method := notification.Method
-			params := make(map[string]interface{})
-			if notification.Params.AdditionalFields != nil {
-				params = notification.Params.AdditionalFields
-			}
-
-			// Broadcast to all A2A notification subscribers
-			a2aServer.BroadcastNotification(server, method, params)
+		// Set notification callback to broadcast notifications to A2A clients
+		sessions_manager.SetNotificationCallback(func(notification cleverchatty.Notification) {
+			// Broadcast the notification to all A2A notification subscribers
+			a2aServer.BroadcastNotification(notification)
 		})
 		logger.Println("MCP notification broadcasting to A2A clients enabled.")
 	}

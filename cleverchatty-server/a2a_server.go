@@ -447,8 +447,8 @@ func (a *A2AServer) removeNotificationSubscription(contextID string) {
 	}
 }
 
-// BroadcastNotification broadcasts an MCP notification to all subscribed A2A clients
-func (a *A2AServer) BroadcastNotification(serverName string, method string, params map[string]interface{}) {
+// BroadcastNotification broadcasts a notification to all subscribed A2A clients
+func (a *A2AServer) BroadcastNotification(notification cleverchatty.Notification) {
 	a.notificationSubsMux.RLock()
 	defer a.notificationSubsMux.RUnlock()
 
@@ -456,7 +456,7 @@ func (a *A2AServer) BroadcastNotification(serverName string, method string, para
 		return // No subscribers
 	}
 
-	a.Logger.Printf("Broadcasting MCP notification from %s: %s to %d subscribers", serverName, method, len(a.notificationSubs))
+	a.Logger.Printf("Broadcasting notification from %s: %s to %d subscribers", notification.ServerName, notification.Method, len(a.notificationSubs))
 
 	// Create notification event
 	for contextID, subscriber := range a.notificationSubs {
@@ -473,9 +473,12 @@ func (a *A2AServer) BroadcastNotification(serverName string, method string, para
 						Role:      a2aprotocol.MessageRoleAgent,
 						Parts: []a2aprotocol.Part{
 							a2aprotocol.NewTextPart("mcp_notification"),
-							a2aprotocol.NewTextPart(serverName),
-							a2aprotocol.NewTextPart(method),
-							a2aprotocol.NewTextPart(fmt.Sprintf("%v", params)),
+							a2aprotocol.NewTextPart(notification.ServerName),
+							a2aprotocol.NewTextPart(notification.Method),
+							a2aprotocol.NewTextPart(notification.Description),
+							a2aprotocol.NewTextPart(string(notification.MonitoringStatus)),
+							a2aprotocol.NewTextPart(string(notification.ProcessingStatus)),
+							a2aprotocol.NewTextPart(fmt.Sprintf("%v", notification.Params)),
 						},
 					},
 				},

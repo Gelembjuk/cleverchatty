@@ -16,7 +16,6 @@ import (
 	"github.com/charmbracelet/huh"
 	cleverchatty "github.com/gelembjuk/cleverchatty/core"
 	"github.com/google/uuid"
-	"github.com/mark3labs/mcp-go/mcp"
 	"github.com/spf13/cobra"
 	a2aclient "trpc.group/trpc-go/trpc-a2a-go/client"
 	a2aprotocol "trpc.group/trpc-go/trpc-a2a-go/protocol"
@@ -99,8 +98,8 @@ func initCleverChattyFunc() tea.Msg {
 	cleverChattyObject.Callbacks = composeCallbacks(true)
 
 	// Set notification callback to send notifications to TUI
-	cleverChattyObject.SetNotificationCallback(func(server string, notification mcp.JSONRPCNotification) {
-		tuiSendNotification(server, notification)
+	cleverChattyObject.SetNotificationCallback(func(notification cleverchatty.Notification) {
+		tuiSendNotification(notification)
 	})
 
 	// Store globally
@@ -591,9 +590,12 @@ func handleNotificationEvent(event a2aprotocol.StreamingMessageEvent) {
 				}
 
 				if textPart.Text == "mcp_notification" && len(e.Status.Message.Parts) >= 3 {
-					// Extract notification details
+					// Extract notification details from the A2A stream
 					serverName := ""
 					method := ""
+					description := ""
+					monitoringStatus := ""
+					processingStatus := ""
 					paramsStr := ""
 
 					if len(e.Status.Message.Parts) > 1 {
@@ -608,6 +610,21 @@ func handleNotificationEvent(event a2aprotocol.StreamingMessageEvent) {
 					}
 					if len(e.Status.Message.Parts) > 3 {
 						if part, ok := e.Status.Message.Parts[3].(*a2aprotocol.TextPart); ok {
+							description = part.Text
+						}
+					}
+					if len(e.Status.Message.Parts) > 4 {
+						if part, ok := e.Status.Message.Parts[4].(*a2aprotocol.TextPart); ok {
+							monitoringStatus = part.Text
+						}
+					}
+					if len(e.Status.Message.Parts) > 5 {
+						if part, ok := e.Status.Message.Parts[5].(*a2aprotocol.TextPart); ok {
+							processingStatus = part.Text
+						}
+					}
+					if len(e.Status.Message.Parts) > 6 {
+						if part, ok := e.Status.Message.Parts[6].(*a2aprotocol.TextPart); ok {
 							paramsStr = part.Text
 						}
 					}
@@ -616,28 +633,27 @@ func handleNotificationEvent(event a2aprotocol.StreamingMessageEvent) {
 					params := make(map[string]interface{})
 					// TODO: Parse paramsStr properly if needed
 					// For now, just store as a single value
-					if paramsStr != "" {
+					if paramsStr != "" && paramsStr != "map[]" {
 						params["raw"] = paramsStr
 					}
 
-					// Create MCP notification structure
-					notification := mcp.JSONRPCNotification{
-						JSONRPC: "2.0",
-						Notification: mcp.Notification{
-							Method: method,
-							Params: mcp.NotificationParams{
-								AdditionalFields: params,
-							},
-						},
+					// Create unified Notification structure
+					notification := cleverchatty.Notification{
+						ServerName:       serverName,
+						Method:           method,
+						Description:      description,
+						MonitoringStatus: cleverchatty.MonitoringStatus(monitoringStatus),
+						ProcessingStatus: cleverchatty.ProcessingStatus(processingStatus),
+						Params:           params,
 					}
 
 					// Send to TUI if in TUI mode, otherwise log
 					if useTUIMode && program != nil {
-						tuiSendNotification(serverName, notification)
+						tuiSendNotification(notification)
 					} else {
-						log.Printf("📧 MCP Notification from %s: %s", serverName, method)
-						if paramsStr != "" {
-							log.Printf("   Params: %s", paramsStr)
+						log.Printf("📧 Notification from %s: %s", serverName, method)
+						if description != "" {
+							log.Printf("   Description: %s", description)
 						}
 					}
 				}

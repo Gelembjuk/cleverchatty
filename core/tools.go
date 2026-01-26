@@ -16,6 +16,12 @@ import (
 	"github.com/mark3labs/mcp-go/mcp"
 )
 
+// notificationCallbackWrapper stores the callback with server name context
+type notificationCallbackWrapper struct {
+	serverName string
+	callback   NotificationCallback
+}
+
 const (
 	memoryToolRememberName = "remember"
 	memoryToolRecallName   = "recall"
@@ -176,13 +182,19 @@ func (host *ToolsHost) Init() error {
 	return nil
 }
 
-// Set notifications callback for all servers
-func (host *ToolsHost) SetNotificationCallback(
-	callback func(server string, notification mcp.JSONRPCNotification),
-) {
+// SetNotificationCallback sets a callback for notifications from all MCP servers.
+// The callback receives a unified Notification structure instead of the raw MCP notification.
+func (host *ToolsHost) SetNotificationCallback(callback NotificationCallback) {
 	for serverName, client := range host.mcpClients {
-		client.OnNotification(func(notification mcp.JSONRPCNotification) {
-			callback(serverName, notification)
+		// Create a wrapper to capture serverName in the closure
+		wrapper := notificationCallbackWrapper{
+			serverName: serverName,
+			callback:   callback,
+		}
+		client.OnNotification(func(mcpNotification mcp.JSONRPCNotification) {
+			// Convert MCP notification to unified Notification
+			notification := NewNotificationFromMCP(wrapper.serverName, mcpNotification)
+			wrapper.callback(notification)
 		})
 	}
 }
