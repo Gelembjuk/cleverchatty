@@ -1,10 +1,12 @@
 package main
 
 import (
+	"bufio"
 	"context"
 	"errors"
 	"fmt"
 	"log"
+	"net/http"
 	"os"
 	"path/filepath"
 	"time"
@@ -48,6 +50,10 @@ var (
 	tuiConfig       *cleverchatty.CleverChattyConfig
 	tuiCleverChatty *cleverchatty.CleverChatty
 	useTUIMode      bool
+	// For client mode
+	tuiA2AClient *a2aclient.A2AClient
+	tuiContextID string
+	tuiAgentID   string
 )
 
 func getTUICleverChatty() *cleverchatty.CleverChatty {
@@ -65,6 +71,13 @@ func tuiPrint(msg string) {
 
 // initCleverChattyFunc initializes the CleverChatty instance for TUI mode
 func initCleverChattyFunc() tea.Msg {
+	// If in client mode (A2A client is set), skip CleverChatty initialization
+	if tuiA2AClient != nil {
+		// Client mode - no local AI initialization needed
+		return initCompleteMsg{cleverChatty: nil, err: nil}
+	}
+
+	// Standalone mode - initialize local CleverChatty
 	// Create a custom logger that writes to the TUI
 	customLogger := log.New(&tuiLogWriter{}, "", log.LstdFlags)
 	if tuiConfig.DebugMode {
@@ -348,6 +361,32 @@ func runWithTUI(ctx context.Context, config *cleverchatty.CleverChattyConfig) er
 	tuiConfig = config
 	useTUIMode = true
 
+	// Redirect all logs to TUI (if not already configured to log to file)
+	var oldStderr *os.File
+	var w *os.File
+	if config.LogFilePath == "" || config.LogFilePath == "stdout" {
+		log.SetOutput(&tuiLogWriter{})
+		log.SetFlags(log.LstdFlags)
+
+		// Also redirect stderr to capture library logs (like MCP server errors)
+		oldStderr = os.Stderr
+		r, pipeW, err := os.Pipe()
+		if err == nil {
+			w = pipeW
+			os.Stderr = w
+			// Start a goroutine to read from the pipe and send to TUI
+			go func() {
+				scanner := bufio.NewScanner(r)
+				for scanner.Scan() {
+					line := scanner.Text()
+					if program != nil {
+						program.Send(logMsg(line + "\n"))
+					}
+				}
+			}()
+		}
+	}
+
 	// Create prompt callback
 	promptCallback := func(prompt string) error {
 		cleverChattyObject := getTUICleverChatty()
@@ -384,6 +423,17 @@ func runWithTUI(ctx context.Context, config *cleverchatty.CleverChattyConfig) er
 	if tuiCleverChatty != nil {
 		tuiCleverChatty.Finish()
 	}
+
+	// Restore stderr if we redirected it
+	if oldStderr != nil {
+		if w != nil {
+			w.Close() // Close the pipe writer
+		}
+		os.Stderr = oldStderr
+	}
+
+	// Restore default logger to stderr
+	log.SetOutput(os.Stderr)
 
 	if err != nil {
 		return fmt.Errorf("error running TUI: %v", err)
@@ -446,6 +496,264 @@ func runWithSimpleInput(ctx context.Context, cleverChattyObject *cleverchatty.Cl
 	}
 }
 
+// subscribeToNotifications establishes a persistent notification subscription stream
+// with auto-reconnection on disconnect
+func subscribeToNotifications(ctx context.Context, a2aClient *a2aclient.A2AClient, contextID string, agentID string) {
+	reconnectDelay := 2 * time.Second
+	maxReconnectDelay := 30 * time.Second
+
+	for {
+		select {
+		case <-ctx.Done():
+			log.Println("Notification subscription cancelled by context")
+			return
+		default:
+			// Try to establish subscription
+			err := subscribeToNotificationsOnce(ctx, a2aClient, contextID, agentID)
+
+			// If context was cancelled, exit
+			if ctx.Err() != nil {
+				log.Println("Notification subscription cancelled by context")
+				return
+			}
+
+			// Connection closed or error - attempt reconnection
+			if err != nil {
+				log.Printf("Notification subscription error: %v. Reconnecting in %v...", err, reconnectDelay)
+			} else {
+				log.Printf("Notification subscription stream closed. Reconnecting in %v...", reconnectDelay)
+			}
+
+			// Wait before reconnecting
+			select {
+			case <-ctx.Done():
+				return
+			case <-time.After(reconnectDelay):
+				// Exponential backoff
+				reconnectDelay *= 2
+				if reconnectDelay > maxReconnectDelay {
+					reconnectDelay = maxReconnectDelay
+				}
+			}
+		}
+	}
+}
+
+// subscribeToNotificationsOnce establishes a single notification subscription stream
+func subscribeToNotificationsOnce(ctx context.Context, a2aClient *a2aclient.A2AClient, contextID string, agentID string) error {
+	// Create subscription request
+	message := a2aprotocol.Message{
+		Role: a2aprotocol.MessageRoleUser,
+		Parts: []a2aprotocol.Part{
+			a2aprotocol.NewTextPart("__subscribe_notifications__"),
+		},
+		ContextID: &contextID,
+		Metadata: map[string]any{
+			"agent_id": agentID,
+		},
+	}
+
+	taskParams := a2aprotocol.SendMessageParams{
+		Message: message,
+	}
+
+	// Open persistent stream
+	streamChan, err := a2aClient.StreamMessage(ctx, taskParams)
+	if err != nil {
+		return fmt.Errorf("failed to open stream: %w", err)
+	}
+
+	log.Println("✓ Notification subscription established")
+
+	// Process notification events until stream closes
+	for event := range streamChan {
+		handleNotificationEvent(event)
+	}
+
+	return nil
+}
+
+// handleNotificationEvent processes notification events from the A2A stream
+func handleNotificationEvent(event a2aprotocol.StreamingMessageEvent) {
+	switch e := event.Result.(type) {
+	case *a2aprotocol.TaskStatusUpdateEvent:
+		if e.Status.Message != nil && len(e.Status.Message.Parts) > 0 {
+			// Check if this is a notification event
+			if textPart, ok := e.Status.Message.Parts[0].(*a2aprotocol.TextPart); ok {
+				if textPart.Text == "notification_subscribed" {
+					log.Println("✓ Notification subscription confirmed by server")
+					return
+				}
+
+				// Ignore keepalive messages (they just keep connection alive)
+				if textPart.Text == "keepalive" {
+					return
+				}
+
+				if textPart.Text == "mcp_notification" && len(e.Status.Message.Parts) >= 3 {
+					// Extract notification details
+					serverName := ""
+					method := ""
+					paramsStr := ""
+
+					if len(e.Status.Message.Parts) > 1 {
+						if part, ok := e.Status.Message.Parts[1].(*a2aprotocol.TextPart); ok {
+							serverName = part.Text
+						}
+					}
+					if len(e.Status.Message.Parts) > 2 {
+						if part, ok := e.Status.Message.Parts[2].(*a2aprotocol.TextPart); ok {
+							method = part.Text
+						}
+					}
+					if len(e.Status.Message.Parts) > 3 {
+						if part, ok := e.Status.Message.Parts[3].(*a2aprotocol.TextPart); ok {
+							paramsStr = part.Text
+						}
+					}
+
+					// Parse params string back to map for notification
+					params := make(map[string]interface{})
+					// TODO: Parse paramsStr properly if needed
+					// For now, just store as a single value
+					if paramsStr != "" {
+						params["raw"] = paramsStr
+					}
+
+					// Create MCP notification structure
+					notification := mcp.JSONRPCNotification{
+						JSONRPC: "2.0",
+						Notification: mcp.Notification{
+							Method: method,
+							Params: mcp.NotificationParams{
+								AdditionalFields: params,
+							},
+						},
+					}
+
+					// Send to TUI if in TUI mode, otherwise log
+					if useTUIMode && program != nil {
+						tuiSendNotification(serverName, notification)
+					} else {
+						log.Printf("📧 MCP Notification from %s: %s", serverName, method)
+						if paramsStr != "" {
+							log.Printf("   Params: %s", paramsStr)
+						}
+					}
+				}
+			}
+		}
+	}
+}
+
+func runAsClientWithTUI(ctx context.Context, a2aClient *a2aclient.A2AClient, contextID string, agentID string) error {
+	// Store client info globally for TUI callbacks
+	tuiContext = ctx
+	tuiA2AClient = a2aClient
+	tuiContextID = contextID
+	tuiAgentID = agentID
+	useTUIMode = true
+
+	// Redirect all logs to TUI
+	log.SetOutput(&tuiLogWriter{})
+	log.SetFlags(log.LstdFlags)
+
+	// Also redirect stderr to capture library logs (like A2A client errors)
+	oldStderr := os.Stderr
+	r, w, err := os.Pipe()
+	if err == nil {
+		os.Stderr = w
+		// Start a goroutine to read from the pipe and send to TUI
+		go func() {
+			scanner := bufio.NewScanner(r)
+			for scanner.Scan() {
+				line := scanner.Text()
+				if program != nil {
+					program.Send(logMsg(line + "\n"))
+				}
+			}
+		}()
+	}
+
+	// Immediately establish persistent notification subscription
+	go subscribeToNotifications(ctx, a2aClient, contextID, agentID)
+
+	// Create prompt callback for client mode
+	promptCallback := func(prompt string) error {
+		if tuiA2AClient == nil {
+			return fmt.Errorf("A2A client not initialized")
+		}
+
+		// Handle slash commands
+		handled, err := handleSlashCommandAsClient(prompt, *tuiA2AClient, ctx, tuiContextID)
+		if err != nil {
+			tuiSendError(err)
+			return err
+		}
+		if handled {
+			return nil
+		}
+
+		// Send message via A2A streaming
+		message := a2aprotocol.Message{
+			Role: a2aprotocol.MessageRoleUser,
+			Parts: []a2aprotocol.Part{
+				a2aprotocol.NewTextPart(prompt),
+			},
+			ContextID: &tuiContextID,
+			Metadata: map[string]any{
+				"agent_id": tuiAgentID,
+			},
+		}
+
+		taskParams := a2aprotocol.SendMessageParams{
+			Message: message,
+		}
+
+		streamChan, err := tuiA2AClient.StreamMessage(ctx, taskParams)
+		if err != nil {
+			tuiSendError(err)
+			return fmt.Errorf("error starting task stream: %v", err)
+		}
+
+		// Process stream events with TUI callbacks
+		_, err = processA2AStreamEvents(ctx, streamChan, composeCallbacks(true))
+		if err != nil {
+			tuiSendError(err)
+			return fmt.Errorf("error processing task stream events: %v", err)
+		}
+
+		return nil
+	}
+
+	// Create TUI model with notifications enabled
+	model := newTUIModel(true, promptCallback)
+	program = tea.NewProgram(model, tea.WithAltScreen())
+
+	// Run the program
+	var runErr error
+	_, runErr = program.Run()
+
+	// Cleanup
+	useTUIMode = false
+	tuiA2AClient = nil
+
+	// Restore stderr if we redirected it
+	if oldStderr != nil {
+		w.Close() // Close the pipe writer
+		os.Stderr = oldStderr
+	}
+
+	// Restore default logger to stderr
+	log.SetOutput(os.Stderr)
+
+	if runErr != nil {
+		return fmt.Errorf("error running TUI: %v", runErr)
+	}
+
+	return nil
+}
+
 func runAsClient(ctx context.Context) error {
 	// 1. Check for streaming capability by fetching the agent card
 	check, err := checkServerIsCleverChatty(server)
@@ -460,8 +768,12 @@ func runAsClient(ctx context.Context) error {
 		return err
 	}
 
-	// 2. Create a new client instance.
-	a2aClient, err := a2aclient.NewA2AClient(server)
+	// 2. Create a new client instance with custom HTTP client for long-lived connections
+	// Use no timeout for SSE streams (notification subscriptions are persistent)
+	httpClient := &http.Client{
+		Timeout: 0, // No timeout for long-lived notification streams
+	}
+	a2aClient, err := a2aclient.NewA2AClient(server, a2aclient.WithHTTPClient(httpClient))
 	if err != nil {
 		return fmt.Errorf("error creating A2A client: %v", err)
 	}
@@ -473,65 +785,12 @@ func runAsClient(ctx context.Context) error {
 	if err := updateRenderer(); err != nil {
 		return fmt.Errorf("error initializing renderer: %v", err)
 	}
+
 	// context id
 	contextID := fmt.Sprintf("session-%d-%s", time.Now().UnixNano(), uuid.New().String())
 
-	// Main interaction loop
-	for {
-		var prompt string
-		err := huh.NewForm(huh.NewGroup(huh.NewText().
-			Title("Enter your prompt (Type /help for commands, Ctrl+C to quit)").
-			Value(&prompt)),
-		).WithWidth(getTerminalWidth()).
-			WithTheme(huh.ThemeCharm()).
-			Run()
-
-		if err != nil {
-			// Check if it's a user abort (Ctrl+C)
-			if errors.Is(err, huh.ErrUserAborted) {
-				fmt.Println("\nGoodbye!")
-				return nil // Exit cleanly
-			}
-			return err // Return other errors normally
-		}
-
-		if prompt == "" {
-			continue
-		}
-
-		// Handle slash commands
-		handled, err := handleSlashCommandAsClient(prompt, *a2aClient, ctx, contextID)
-		if err != nil {
-			return err
-		}
-		if handled {
-			continue
-		}
-
-		message := a2aprotocol.Message{
-			Role: a2aprotocol.MessageRoleUser,
-			Parts: []a2aprotocol.Part{
-				a2aprotocol.NewTextPart(prompt),
-			},
-			ContextID: &contextID, // Use the context ID for the session
-			Metadata: map[string]any{
-				"agent_id": agentid,
-			},
-		}
-
-		taskParams := a2aprotocol.SendMessageParams{
-			Message: message,
-		}
-
-		streamChan, err := a2aClient.StreamMessage(ctx, taskParams)
-		if err != nil {
-			return fmt.Errorf("error starting task stream: %v", err)
-		}
-		_, err = processA2AStreamEvents(ctx, streamChan, composeCallbacks(false))
-		if err != nil {
-			return fmt.Errorf("error processing task stream events: %v", err)
-		}
-	}
+	// Always use TUI in client mode
+	return runAsClientWithTUI(ctx, a2aClient, contextID, agentid)
 }
 
 func main() {

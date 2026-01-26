@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log"
 	"strings"
+	"sync"
 	"time"
 
 	cleverchatty "github.com/gelembjuk/cleverchatty/core"
@@ -17,11 +18,13 @@ import (
 const A2AServerVersion = "0.1.0"
 
 type A2AServer struct {
-	A2AServerConfig *cleverchatty.A2AServerConfig
-	SessionsManager *cleverchatty.SessionManager
-	WorkDirectory   string
-	Logger          *log.Logger
-	server          *a2aserver.A2AServer
+	A2AServerConfig     *cleverchatty.A2AServerConfig
+	SessionsManager     *cleverchatty.SessionManager
+	WorkDirectory       string
+	Logger              *log.Logger
+	server              *a2aserver.A2AServer
+	notificationSubs    map[string]a2ataskmanager.TaskSubscriber
+	notificationSubsMux sync.RWMutex
 }
 
 // Helper function to create string pointers
@@ -41,10 +44,11 @@ func getA2AServer(
 	logger *log.Logger) (*A2AServer, error) {
 
 	a2aServer := &A2AServer{
-		SessionsManager: sessionsManager,
-		A2AServerConfig: a2aConfig,
-		WorkDirectory:   WorkDirectory,
-		Logger:          logger,
+		SessionsManager:  sessionsManager,
+		A2AServerConfig:  a2aConfig,
+		WorkDirectory:    WorkDirectory,
+		Logger:           logger,
+		notificationSubs: make(map[string]a2ataskmanager.TaskSubscriber),
 	}
 
 	return a2aServer, nil
@@ -104,6 +108,11 @@ func (a *A2AServer) ProcessMessage(
 
 	if prompt == "" {
 		return nil, fmt.Errorf("no text part found in the message")
+	}
+
+	// Check if this is a notification subscription request
+	if prompt == "__subscribe_notifications__" {
+		return a.handleNotificationSubscription(ctx, message, options, handle)
 	}
 
 	agentid := ""
@@ -307,6 +316,179 @@ func (a *A2AServer) statusFailed(err error, taskID string, contextID string, sub
 	}
 }
 
+// handleNotificationSubscription handles persistent notification subscription requests
+func (a *A2AServer) handleNotificationSubscription(
+	ctx context.Context,
+	message a2aprotocol.Message,
+	options a2ataskmanager.ProcessOptions,
+	handle a2ataskmanager.TaskHandler,
+) (*a2ataskmanager.MessageProcessingResult, error) {
+	// Generate context ID if not provided
+	if message.ContextID == nil {
+		message.ContextID = stringPtr(uuid.New().String())
+	}
+
+	contextID := *message.ContextID
+	a.Logger.Printf("Notification subscription requested for context: %s", contextID)
+
+	// Must be streaming mode for persistent connection
+	if !options.Streaming {
+		return nil, fmt.Errorf("notification subscription requires streaming mode")
+	}
+
+	// Create a persistent task for notification subscription
+	taskID, err := handle.BuildTask(nil, nil)
+	if err != nil {
+		return nil, fmt.Errorf("failed to build notification subscription task: %w", err)
+	}
+
+	// Subscribe to the task for streaming events
+	subscriber, err := handle.SubScribeTask(&taskID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to subscribe to notification task: %w", err)
+	}
+
+	// Store subscriber in the notifications map
+	a.notificationSubsMux.Lock()
+	// Remove old subscription if exists
+	if oldSub, exists := a.notificationSubs[contextID]; exists {
+		oldSub.Close()
+	}
+	a.notificationSubs[contextID] = subscriber
+	a.notificationSubsMux.Unlock()
+
+	a.Logger.Printf("Notification subscription established for context: %s (taskID: %s)", contextID, taskID)
+
+	// Send initial "subscribed" confirmation event
+	subscribedEvent := a2aprotocol.StreamingMessageEvent{
+		Result: &a2aprotocol.TaskStatusUpdateEvent{
+			TaskID:    taskID,
+			ContextID: contextID,
+			Kind:      "status-update",
+			Status: a2aprotocol.TaskStatus{
+				State: a2aprotocol.TaskStateWorking,
+				Message: &a2aprotocol.Message{
+					MessageID: uuid.New().String(),
+					Kind:      "message",
+					Role:      a2aprotocol.MessageRoleAgent,
+					Parts: []a2aprotocol.Part{
+						a2aprotocol.NewTextPart("notification_subscribed"),
+						a2aprotocol.NewTextPart("Notification subscription active"),
+					},
+				},
+			},
+		},
+	}
+
+	err = subscriber.Send(subscribedEvent)
+	if err != nil {
+		a.Logger.Printf("Failed to send subscribed event: %v", err)
+	}
+
+	// Start keepalive heartbeat to prevent connection timeout
+	go func() {
+		ticker := time.NewTicker(30 * time.Second)
+		defer ticker.Stop()
+
+		for {
+			select {
+			case <-ctx.Done():
+				a.Logger.Printf("Notification subscription context cancelled for: %s", contextID)
+				a.removeNotificationSubscription(contextID)
+				return
+			case <-ticker.C:
+				// Send keepalive heartbeat
+				keepaliveEvent := a2aprotocol.StreamingMessageEvent{
+					Result: &a2aprotocol.TaskStatusUpdateEvent{
+						TaskID:    taskID,
+						ContextID: contextID,
+						Kind:      "status-update",
+						Status: a2aprotocol.TaskStatus{
+							State: a2aprotocol.TaskStateWorking,
+							Message: &a2aprotocol.Message{
+								MessageID: uuid.New().String(),
+								Kind:      "message",
+								Role:      a2aprotocol.MessageRoleAgent,
+								Parts: []a2aprotocol.Part{
+									a2aprotocol.NewTextPart("keepalive"),
+									a2aprotocol.NewTextPart("Connection active"),
+								},
+							},
+						},
+					},
+				}
+
+				err := subscriber.Send(keepaliveEvent)
+				if err != nil {
+					a.Logger.Printf("Failed to send keepalive for context %s: %v", contextID, err)
+					a.removeNotificationSubscription(contextID)
+					return
+				}
+			}
+		}
+	}()
+
+	// Return the streaming subscriber
+	// Note: We do NOT send a completion event - this stream stays open indefinitely
+	return &a2ataskmanager.MessageProcessingResult{
+		StreamingEvents: subscriber,
+	}, nil
+}
+
+// removeNotificationSubscription removes a notification subscription
+func (a *A2AServer) removeNotificationSubscription(contextID string) {
+	a.notificationSubsMux.Lock()
+	defer a.notificationSubsMux.Unlock()
+
+	if sub, exists := a.notificationSubs[contextID]; exists {
+		sub.Close()
+		delete(a.notificationSubs, contextID)
+		a.Logger.Printf("Removed notification subscription for context: %s", contextID)
+	}
+}
+
+// BroadcastNotification broadcasts an MCP notification to all subscribed A2A clients
+func (a *A2AServer) BroadcastNotification(serverName string, method string, params map[string]interface{}) {
+	a.notificationSubsMux.RLock()
+	defer a.notificationSubsMux.RUnlock()
+
+	if len(a.notificationSubs) == 0 {
+		return // No subscribers
+	}
+
+	a.Logger.Printf("Broadcasting MCP notification from %s: %s to %d subscribers", serverName, method, len(a.notificationSubs))
+
+	// Create notification event
+	for contextID, subscriber := range a.notificationSubs {
+		notifEvent := a2aprotocol.StreamingMessageEvent{
+			Result: &a2aprotocol.TaskStatusUpdateEvent{
+				TaskID:    "notification_" + uuid.New().String(),
+				ContextID: contextID,
+				Kind:      "status-update",
+				Status: a2aprotocol.TaskStatus{
+					State: a2aprotocol.TaskStateWorking,
+					Message: &a2aprotocol.Message{
+						MessageID: uuid.New().String(),
+						Kind:      "message",
+						Role:      a2aprotocol.MessageRoleAgent,
+						Parts: []a2aprotocol.Part{
+							a2aprotocol.NewTextPart("mcp_notification"),
+							a2aprotocol.NewTextPart(serverName),
+							a2aprotocol.NewTextPart(method),
+							a2aprotocol.NewTextPart(fmt.Sprintf("%v", params)),
+						},
+					},
+				},
+			},
+		}
+
+		err := subscriber.Send(notifEvent)
+		if err != nil {
+			a.Logger.Printf("Failed to send notification to context %s: %v", contextID, err)
+		}
+	}
+}
+
 func (a *A2AServer) Start() error {
 	// Create task manager, inject processor
 	taskManager, err := a2ataskmanager.NewMemoryTaskManager(a)
@@ -314,8 +496,14 @@ func (a *A2AServer) Start() error {
 		return fmt.Errorf("failed to create task manager: %w", err)
 	}
 
-	// Create the server
-	a.server, err = a2aserver.NewA2AServer(a.agentCard(), taskManager)
+	// Create the server with no timeouts for long-lived notification streams
+	a.server, err = a2aserver.NewA2AServer(
+		a.agentCard(),
+		taskManager,
+		a2aserver.WithReadTimeout(0),   // No read timeout for persistent connections
+		a2aserver.WithWriteTimeout(0),  // No write timeout for streaming responses
+		a2aserver.WithIdleTimeout(0),   // No idle timeout for long-lived connections
+	)
 	if err != nil {
 		return fmt.Errorf("failed to create server: %w", err)
 	}

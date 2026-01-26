@@ -5,6 +5,8 @@ import (
 	"log"
 	"sync"
 	"time"
+
+	"github.com/mark3labs/mcp-go/mcp"
 )
 
 type Session struct {
@@ -14,12 +16,13 @@ type Session struct {
 }
 
 type SessionManager struct {
-	sessions         map[string]*Session
-	mutex            sync.RWMutex
-	config           *CleverChattyConfig
-	context          context.Context
-	logger           *log.Logger
-	reverseMCPClient ReverseMCPClient
+	sessions             map[string]*Session
+	mutex                sync.RWMutex
+	config               *CleverChattyConfig
+	context              context.Context
+	logger               *log.Logger
+	reverseMCPClient     ReverseMCPClient
+	notificationCallback func(server string, notification mcp.JSONRPCNotification)
 }
 
 func NewSessionManager(config *CleverChattyConfig, ctx context.Context, logger *log.Logger) *SessionManager {
@@ -34,6 +37,11 @@ func NewSessionManager(config *CleverChattyConfig, ctx context.Context, logger *
 // SetReverseMCPClient sets the reverse MCP client for dynamic tool registration
 func (sm *SessionManager) SetReverseMCPClient(client ReverseMCPClient) {
 	sm.reverseMCPClient = client
+}
+
+// SetNotificationCallback sets the callback for MCP notifications
+func (sm *SessionManager) SetNotificationCallback(callback func(server string, notification mcp.JSONRPCNotification)) {
+	sm.notificationCallback = callback
 }
 
 func (sm *SessionManager) GetOrCreateSession(id string, clientAgentID string) (*Session, error) {
@@ -61,6 +69,11 @@ func (sm *SessionManager) GetOrCreateSession(id string, clientAgentID string) (*
 	// Set reverse MCP client if available
 	if sm.reverseMCPClient != nil {
 		ai.SetReverseMCPClient(sm.reverseMCPClient)
+	}
+
+	// Set notification callback if available
+	if sm.notificationCallback != nil {
+		ai.SetNotificationCallback(sm.notificationCallback)
 	}
 
 	// Create new session

@@ -11,6 +11,7 @@ import (
 	"syscall"
 
 	cleverchatty "github.com/gelembjuk/cleverchatty/core"
+	"github.com/mark3labs/mcp-go/mcp"
 	"github.com/spf13/cobra"
 )
 
@@ -222,6 +223,20 @@ func runServer() error {
 			return fmt.Errorf("failed to start A2A server: %v", err)
 		}
 		logger.Println("A2A server started successfully.")
+
+		// Set notification callback to broadcast MCP notifications to A2A clients
+		sessions_manager.SetNotificationCallback(func(server string, notification mcp.JSONRPCNotification) {
+			// Extract notification details
+			method := notification.Method
+			params := make(map[string]interface{})
+			if notification.Params.AdditionalFields != nil {
+				params = notification.Params.AdditionalFields
+			}
+
+			// Broadcast to all A2A notification subscribers
+			a2aServer.BroadcastNotification(server, method, params)
+		})
+		logger.Println("MCP notification broadcasting to A2A clients enabled.")
 	}
 
 	// Initialize Reverse MCP connector if enabled
