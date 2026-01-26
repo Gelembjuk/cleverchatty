@@ -104,6 +104,23 @@ func (assistant *CleverChatty) SetReverseMCPClient(client ReverseMCPClient) {
 	}
 }
 
+// SetTool registers a custom tool with the assistant.
+// The tool will be available to the LLM alongside MCP and A2A tools.
+// Returns an error if the tool definition is invalid.
+func (assistant *CleverChatty) SetTool(tool CustomTool) error {
+	if assistant.toolsHost == nil {
+		return fmt.Errorf("toolsHost not initialized, call Init() first")
+	}
+	return assistant.toolsHost.AddCustomTool(tool)
+}
+
+// RemoveTool removes a custom tool by name
+func (assistant *CleverChatty) RemoveTool(name string) {
+	if assistant.toolsHost != nil {
+		assistant.toolsHost.RemoveCustomTool(name)
+	}
+}
+
 // Add new function to create provider
 func (assistant CleverChatty) createProvider(ctx context.Context, modelString string) (llm.Provider, error) {
 	parts := strings.SplitN(modelString, ":", 2)

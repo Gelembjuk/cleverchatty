@@ -42,6 +42,8 @@ type ToolsHost struct {
 	reverseMCPClient ReverseMCPClient
 	tools            []llm.Tool
 	toolsMux         sync.RWMutex
+	customTools      map[string]CustomTool
+	customToolsMux   sync.RWMutex
 	memoryServerName string
 	ragServerName    string
 }
@@ -198,7 +200,7 @@ func (host *ToolsHost) SetReverseMCPClient(client ReverseMCPClient) {
 	host.reverseMCPClient = client
 }
 
-// GetAllToolsForLLM returns all tools including dynamically loaded reverse MCP tools
+// GetAllToolsForLLM returns all tools including dynamically loaded reverse MCP tools and custom tools
 func (host *ToolsHost) GetAllToolsForLLM() []llm.Tool {
 	host.toolsMux.RLock()
 	// Start with a copy of static tools
@@ -214,6 +216,10 @@ func (host *ToolsHost) GetAllToolsForLLM() []llm.Tool {
 			allTools = append(allTools, converted...)
 		}
 	}
+
+	// Add custom tools
+	customTools := host.getCustomToolsForLLM()
+	allTools = append(allTools, customTools...)
 
 	return allTools
 }
@@ -580,8 +586,11 @@ func (host *ToolsHost) callTool(serverName string, toolName string, toolArgs map
 	if host.isReverseMCPServer(serverName) {
 		return host.callReverseMCPTool(serverName, toolName, toolArgs, ctx)
 	}
+	if host.isCustomTool(serverName) {
+		return host.callCustomTool(toolName, toolArgs, ctx)
+	}
 	return ToolCallResult{
-		Error: fmt.Errorf("server %s is not a valid MCP, A2A, or reverse MCP server", serverName),
+		Error: fmt.Errorf("server %s is not a valid MCP, A2A, reverse MCP, or custom tool server", serverName),
 	}
 }
 
