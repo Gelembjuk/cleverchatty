@@ -16,6 +16,14 @@ dev_tools/notifications_client/stdio-client/stdio-client
 dev_tools/notifications_client/stdio-client/client
 dev_tools/notifications_client/http-server/http-server
 dev_tools/notifications_client/http-client/http-client
+dev_tools/email_mock/http-server/email-http-server
+dev_tools/email_mock/stdio-server/email-stdio-server
+dev_tools/listener_verify/listener-verify
+dev_tools/notifications_client/http-client/notifications-http-client
+dev_tools/notifications_client/http-server/notifications-http-server
+dev_tools/notifications_client/stdio-client/notifications-stdio-client
+dev_tools/notifications_client/stdio-server/notifications-stdio-server
+dev_tools/reverse_mcp_server/reverse-mcp-server
 
 .claude
 .claude/*

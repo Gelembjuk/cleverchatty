@@ -113,11 +113,34 @@ func (s InternalServerConfig) GetType() string {
 	return transportInternal
 }
 
+// NotificationInstruction defines instructions for handling a specific notification method
+type NotificationInstruction struct {
+	Method       string   `json:"method"`
+	Instructions []string `json:"instructions"`
+}
+
 type ServerConfigWrapper struct {
-	Config    ToolsServerConfig
-	Interface string `json:"interface"`
-	Disabled  bool   `json:"disabled"`
-	Required  bool   `json:"required"`
+	Config                   ToolsServerConfig
+	Interface                string                    `json:"interface"`
+	Disabled                 bool                      `json:"disabled"`
+	Required                 bool                      `json:"required"`
+	NotificationInstructions []NotificationInstruction `json:"notification_instructions,omitempty"`
+}
+
+// GetNotificationInstructions returns the instructions for a given notification method
+// Returns nil if the method is not monitored
+func (w ServerConfigWrapper) GetNotificationInstructions(method string) []string {
+	for _, ni := range w.NotificationInstructions {
+		if ni.Method == method {
+			return ni.Instructions
+		}
+	}
+	return nil
+}
+
+// IsNotificationMonitored returns true if the notification method is configured to be monitored
+func (w ServerConfigWrapper) IsNotificationMonitored(method string) bool {
+	return w.GetNotificationInstructions(method) != nil
 }
 
 type RAGConfig struct {
@@ -229,13 +252,14 @@ func LoadConfig(configPath string) (*CleverChattyConfig, error) {
 
 func (w *ServerConfigWrapper) UnmarshalJSON(data []byte) error {
 	var typeField struct {
-		Url       string `json:"url"`
-		Endpoint  string `json:"endpoint"`
-		AuthToken string `json:"auth_token"`
-		Transport string `json:"transport"`
-		Interface string `json:"interface"`
-		Disabled  bool   `json:"disabled"`
-		Required  bool   `json:"required"`
+		Url                      string                    `json:"url"`
+		Endpoint                 string                    `json:"endpoint"`
+		AuthToken                string                    `json:"auth_token"`
+		Transport                string                    `json:"transport"`
+		Interface                string                    `json:"interface"`
+		Disabled                 bool                      `json:"disabled"`
+		Required                 bool                      `json:"required"`
+		NotificationInstructions []NotificationInstruction `json:"notification_instructions,omitempty"`
 	}
 
 	if err := json.Unmarshal(data, &typeField); err != nil {
@@ -244,6 +268,7 @@ func (w *ServerConfigWrapper) UnmarshalJSON(data []byte) error {
 	w.Interface = typeField.Interface
 	w.Disabled = typeField.Disabled
 	w.Required = typeField.Required
+	w.NotificationInstructions = typeField.NotificationInstructions
 
 	if typeField.Transport == transportReverseMCP {
 		// Reverse MCP server - remote server connects to us
@@ -287,7 +312,33 @@ func (w *ServerConfigWrapper) UnmarshalJSON(data []byte) error {
 	return nil
 }
 func (w ServerConfigWrapper) MarshalJSON() ([]byte, error) {
-	return json.Marshal(w.Config)
+	// First marshal the config to get its fields
+	configData, err := json.Marshal(w.Config)
+	if err != nil {
+		return nil, err
+	}
+
+	// Unmarshal config into a map
+	var result map[string]any
+	if err := json.Unmarshal(configData, &result); err != nil {
+		return nil, err
+	}
+
+	// Add wrapper-level fields
+	if w.Interface != "" {
+		result["interface"] = w.Interface
+	}
+	if w.Disabled {
+		result["disabled"] = w.Disabled
+	}
+	if w.Required {
+		result["required"] = w.Required
+	}
+	if len(w.NotificationInstructions) > 0 {
+		result["notification_instructions"] = w.NotificationInstructions
+	}
+
+	return json.Marshal(result)
 }
 
 func (w ServerConfigWrapper) isMemoryServer() bool {

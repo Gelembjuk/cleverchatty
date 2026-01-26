@@ -184,9 +184,14 @@ func (host *ToolsHost) Init() error {
 
 // SetNotificationCallback sets a callback for notifications from all MCP servers.
 // The callback receives a unified Notification structure instead of the raw MCP notification.
+// If a notification method is configured in notification_instructions for the server,
+// the notification will be marked as monitored.
 func (host *ToolsHost) SetNotificationCallback(callback NotificationCallback) {
 	for serverName, client := range host.mcpClients {
-		// Create a wrapper to capture serverName in the closure
+		// Get the server config to check for notification instructions
+		serverConfig := host.config[serverName]
+
+		// Create a wrapper to capture serverName and config in the closure
 		wrapper := notificationCallbackWrapper{
 			serverName: serverName,
 			callback:   callback,
@@ -194,6 +199,16 @@ func (host *ToolsHost) SetNotificationCallback(callback NotificationCallback) {
 		client.OnNotification(func(mcpNotification mcp.JSONRPCNotification) {
 			// Convert MCP notification to unified Notification
 			notification := NewNotificationFromMCP(wrapper.serverName, mcpNotification)
+
+			// Check if this notification method is monitored
+			if instructions := serverConfig.GetNotificationInstructions(mcpNotification.Method); instructions != nil {
+				notification.SetMonitored()
+				host.logger.Printf(
+					"Notification is monitored, instructions are: %v",
+					instructions,
+				)
+			}
+
 			wrapper.callback(notification)
 		})
 	}
