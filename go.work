@@ -4,9 +4,12 @@ use (
 	./cleverchatty-cli
 	./cleverchatty-server
 	./core
-	./dev_tools/notifications_client/stdio-client
-	./dev_tools/notifications_client/stdio-server
+	./dev_tools/email_mock/http-server
+	./dev_tools/email_mock/shared
+	./dev_tools/email_mock/stdio-server
 	./dev_tools/notifications_client/http-client
 	./dev_tools/notifications_client/http-server
 	./dev_tools/notifications_client/shared
+	./dev_tools/notifications_client/stdio-client
+	./dev_tools/notifications_client/stdio-server
 )

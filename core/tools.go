@@ -176,6 +176,16 @@ func (host *ToolsHost) Init() error {
 	return nil
 }
 
+// Set notifications callback for all servers
+func (host *ToolsHost) SetNotificationCallback(
+	callback func(server string, notification mcp.JSONRPCNotification),
+) {
+	for serverName, client := range host.mcpClients {
+		client.OnNotification(func(notification mcp.JSONRPCNotification) {
+			callback(serverName, notification)
+		})
+	}
+}
 func (host *ToolsHost) isMCPServer(serverName string) bool {
 	_, ok := host.mcpClients[serverName]
 	return ok
@@ -392,10 +402,6 @@ func (host *ToolsHost) createMCPClients() error {
 				err,
 			)
 		}
-
-		client.OnNotification(func(notification mcp.JSONRPCNotification) {
-			host.logger.Printf("Notification received from server %s: %+v\n", name, notification)
-		})
 
 		clients[name] = client
 

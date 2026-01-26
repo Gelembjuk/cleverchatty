@@ -12,9 +12,9 @@ import (
 	markdown "github.com/MichaelMure/go-term-markdown"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/huh"
-	charmlog "github.com/charmbracelet/log"
 	cleverchatty "github.com/gelembjuk/cleverchatty/core"
 	"github.com/google/uuid"
+	"github.com/mark3labs/mcp-go/mcp"
 	"github.com/spf13/cobra"
 	a2aclient "trpc.group/trpc-go/trpc-a2a-go/client"
 	a2aprotocol "trpc.group/trpc-go/trpc-a2a-go/protocol"
@@ -44,10 +44,10 @@ var (
 )
 
 var (
-	tuiContext       context.Context
-	tuiConfig        *cleverchatty.CleverChattyConfig
-	tuiCleverChatty  *cleverchatty.CleverChatty
-	useTUIMode       bool
+	tuiContext      context.Context
+	tuiConfig       *cleverchatty.CleverChattyConfig
+	tuiCleverChatty *cleverchatty.CleverChatty
+	useTUIMode      bool
 )
 
 func getTUICleverChatty() *cleverchatty.CleverChatty {
@@ -84,6 +84,11 @@ func initCleverChattyFunc() tea.Msg {
 
 	// Set callbacks to use TUI
 	cleverChattyObject.Callbacks = composeCallbacks(true)
+
+	// Set notification callback to send notifications to TUI
+	cleverChattyObject.SetNotificationCallback(func(server string, notification mcp.JSONRPCNotification) {
+		tuiSendNotification(server, notification)
+	})
 
 	// Store globally
 	tuiCleverChatty = cleverChattyObject
@@ -329,33 +334,8 @@ func runAsStandalone(ctx context.Context) error {
 		return fmt.Errorf("error loading config: %v", err)
 	}
 
-	// Check if logs should be shown (when LogFilePath is "stdout")
-	showLogs := config.LogFilePath == "stdout"
-
-	var cleverChattyObject *cleverchatty.CleverChatty
-
-	// Use TUI if logs are enabled, otherwise use the simple form input
-	if showLogs {
-		// For TUI mode, we need to create a custom logger
-		return runWithTUI(ctx, config)
-	} else {
-		cleverChattyObject, err = cleverchatty.GetCleverChatty(*config, ctx)
-		if err != nil {
-			return fmt.Errorf("error creating assistant: %v", err)
-		}
-
-		err = cleverChattyObject.Init()
-		if err != nil {
-			return fmt.Errorf("error initializing assistant: %v", err)
-		}
-
-		defer func() {
-			charmlog.Info("Shutting down CleverChatty core...")
-			cleverChattyObject.Finish()
-		}()
-
-		return runWithSimpleInput(ctx, cleverChattyObject)
-	}
+	// Always use TUI in standalone mode
+	return runWithTUI(ctx, config)
 }
 
 func runWithTUI(ctx context.Context, config *cleverchatty.CleverChattyConfig) error {

@@ -13,6 +13,7 @@ import (
 	"github.com/gelembjuk/cleverchatty/core/llm/ollama"
 	"github.com/gelembjuk/cleverchatty/core/llm/openai"
 	"github.com/gelembjuk/cleverchatty/core/test"
+	"github.com/mark3labs/mcp-go/mcp"
 )
 
 type CleverChatty struct {
@@ -102,6 +103,13 @@ func (assistant *CleverChatty) SetReverseMCPClient(client ReverseMCPClient) {
 	if assistant.toolsHost != nil {
 		assistant.toolsHost.SetReverseMCPClient(client)
 	}
+}
+
+// Set notifications callback for all servers
+func (assistant *CleverChatty) SetNotificationCallback(
+	callback func(server string, notification mcp.JSONRPCNotification),
+) {
+	assistant.toolsHost.SetNotificationCallback(callback)
 }
 
 // Add new function to create provider

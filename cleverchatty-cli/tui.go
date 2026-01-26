@@ -8,12 +8,17 @@ import (
 	"github.com/charmbracelet/bubbles/viewport"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
+	"github.com/mark3labs/mcp-go/mcp"
 	"github.com/muesli/reflow/wordwrap"
 )
 
 // Messages for Bubble Tea
 type chatMsg string
 type logMsg string
+type notificationMsg struct {
+	server       string
+	notification mcp.JSONRPCNotification
+}
 type spinnerMsg string
 type clearSpinnerMsg struct{}
 type errorMsg error
@@ -25,22 +30,22 @@ type initCompleteMsg struct {
 
 // TUI model
 type tuiModel struct {
-	chatViewport    viewport.Model
-	logsViewport    viewport.Model
-	input           textarea.Model
-	showLogs        bool
-	ready           bool
-	initialized     bool
-	currentSpinner  string
-	width           int
-	height          int
-	chatContent     *strings.Builder
-	logsContent     *strings.Builder
-	promptCallback  func(string) error
-	cleverChatty    interface{}
+	chatViewport           viewport.Model
+	notificationsViewport  viewport.Model
+	input                  textarea.Model
+	showNotifications      bool
+	ready                  bool
+	initialized            bool
+	currentSpinner         string
+	width                  int
+	height                 int
+	chatContent            *strings.Builder
+	notificationsContent   *strings.Builder
+	promptCallback         func(string) error
+	cleverChatty           interface{}
 }
 
-func newTUIModel(showLogs bool, promptCallback func(string) error) tuiModel {
+func newTUIModel(showNotifications bool, promptCallback func(string) error) tuiModel {
 	input := textarea.New()
 	input.Placeholder = "Type your message and press Enter to send (PgUp/PgDn to scroll, /help for commands)"
 	input.Focus()
@@ -52,7 +57,7 @@ func newTUIModel(showLogs bool, promptCallback func(string) error) tuiModel {
 	input.KeyMap.InsertNewline.SetEnabled(false)
 
 	chatContent := &strings.Builder{}
-	logsContent := &strings.Builder{}
+	notificationsContent := &strings.Builder{}
 
 	// Add initial welcome message
 	welcomeStyle := lipgloss.NewStyle().Foreground(tokyoCyan).Bold(true)
@@ -64,11 +69,11 @@ func newTUIModel(showLogs bool, promptCallback func(string) error) tuiModel {
 	chatContent.WriteString("\n")
 
 	return tuiModel{
-		input:          input,
-		showLogs:       showLogs,
-		promptCallback: promptCallback,
-		chatContent:    chatContent,
-		logsContent:    logsContent,
+		input:                input,
+		showNotifications:    showNotifications,
+		promptCallback:       promptCallback,
+		chatContent:          chatContent,
+		notificationsContent: notificationsContent,
 	}
 }
 
@@ -154,35 +159,36 @@ func (m tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		viewportHeight := msg.Height - 8
 
 		// Calculate widths based on layout
-		var chatWidth, logsWidth int
-		if m.showLogs {
-			// Split view - account for borders (4 chars each side) and gap
-			chatWidth = (msg.Width / 2) - 8
-			logsWidth = (msg.Width / 2) - 8
+		var chatWidth, notificationsWidth int
+		if m.showNotifications {
+			// Split view - 75% for chat (left), 25% for notifications (right)
+			// Account for borders (4 chars each side) and gap
+			chatWidth = ((msg.Width * 3) / 4) - 8
+			notificationsWidth = (msg.Width / 4) - 8
 		} else {
 			chatWidth = msg.Width - 8
 		}
 
 		if !m.ready {
 			m.chatViewport = viewport.New(chatWidth, viewportHeight)
-			m.logsViewport = viewport.New(logsWidth, viewportHeight)
+			m.notificationsViewport = viewport.New(notificationsWidth, viewportHeight)
 			m.chatViewport.YPosition = 0
-			m.logsViewport.YPosition = 0
+			m.notificationsViewport.YPosition = 0
 			// Enable word wrapping
 			m.chatViewport.Style = lipgloss.NewStyle().Width(chatWidth)
-			m.logsViewport.Style = lipgloss.NewStyle().Width(logsWidth)
+			m.notificationsViewport.Style = lipgloss.NewStyle().Width(notificationsWidth)
 			// Set initial content
 			m.chatViewport.SetContent(m.chatContent.String())
-			m.logsViewport.SetContent(m.logsContent.String())
+			m.notificationsViewport.SetContent(m.notificationsContent.String())
 			// Scroll to bottom
 			m.chatViewport.GotoBottom()
-			m.logsViewport.GotoBottom()
+			m.notificationsViewport.GotoBottom()
 			m.ready = true
 		} else {
 			m.chatViewport.Width = chatWidth
-			m.logsViewport.Width = logsWidth
+			m.notificationsViewport.Width = notificationsWidth
 			m.chatViewport.Height = viewportHeight
-			m.logsViewport.Height = viewportHeight
+			m.notificationsViewport.Height = viewportHeight
 		}
 
 		// Update input width to match chat viewport
@@ -191,7 +197,7 @@ func (m tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// Keep scrolled to bottom after resize
 		if m.ready {
 			m.chatViewport.GotoBottom()
-			m.logsViewport.GotoBottom()
+			m.notificationsViewport.GotoBottom()
 		}
 
 	case chatMsg:
@@ -208,18 +214,47 @@ func (m tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.chatViewport.GotoBottom()
 
 	case logMsg:
-		if m.showLogs {
+		// Logs are now mixed with chat messages in chronological order
+		text := string(msg)
+		if m.ready && m.chatViewport.Width > 0 {
+			text = wordwrap.String(text, m.chatViewport.Width)
+		}
+		// Add log styling to distinguish from chat
+		logStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("240"))
+		styledText := logStyle.Render(text)
+		m.chatContent.WriteString(styledText)
+		if !strings.HasSuffix(styledText, "\n") {
+			m.chatContent.WriteString("\n")
+		}
+		m.chatViewport.SetContent(m.chatContent.String())
+		m.chatViewport.GotoBottom()
+
+	case notificationMsg:
+		if m.showNotifications {
+			// Format notification message
+			notifStyle := lipgloss.NewStyle().Foreground(tokyoYellow)
+			serverStyle := lipgloss.NewStyle().Foreground(tokyoCyan).Bold(true)
+
+			text := fmt.Sprintf("%s\n", serverStyle.Render("["+msg.server+"]"))
+
+			// Try to extract useful info from notification
+			if msg.notification.Method != "" {
+				text += fmt.Sprintf("📢 %s\n", notifStyle.Render(msg.notification.Method))
+			}
+			if msg.notification.Params.AdditionalFields != nil {
+				for key, value := range msg.notification.Params.AdditionalFields {
+					text += fmt.Sprintf("  %s: %v\n", key, value)
+				}
+			}
+			text += "\n"
+
 			// Wrap text to viewport width if ready
-			text := string(msg)
-			if m.ready && m.logsViewport.Width > 0 {
-				text = wordwrap.String(text, m.logsViewport.Width)
+			if m.ready && m.notificationsViewport.Width > 0 {
+				text = wordwrap.String(text, m.notificationsViewport.Width)
 			}
-			m.logsContent.WriteString(text)
-			if !strings.HasSuffix(text, "\n") {
-				m.logsContent.WriteString("\n")
-			}
-			m.logsViewport.SetContent(m.logsContent.String())
-			m.logsViewport.GotoBottom()
+			m.notificationsContent.WriteString(text)
+			m.notificationsViewport.SetContent(m.notificationsContent.String())
+			m.notificationsViewport.GotoBottom()
 		}
 
 	case spinnerMsg:
@@ -251,8 +286,8 @@ func (m tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	// Update all components
 	m.input, tiCmd = m.input.Update(msg)
 	m.chatViewport, vpCmd = m.chatViewport.Update(msg)
-	if m.showLogs {
-		m.logsViewport, lpCmd = m.logsViewport.Update(msg)
+	if m.showNotifications {
+		m.notificationsViewport, lpCmd = m.notificationsViewport.Update(msg)
 	}
 
 	return m, tea.Batch(tiCmd, vpCmd, lpCmd)
@@ -269,9 +304,9 @@ func (m tuiModel) View() string {
 		BorderForeground(tokyoBlue).
 		Padding(1, 2)
 
-	logsStyle := lipgloss.NewStyle().
+	notificationsStyle := lipgloss.NewStyle().
 		Border(lipgloss.RoundedBorder()).
-		BorderForeground(tokyoGreen).
+		BorderForeground(tokyoYellow).
 		Padding(1, 2)
 
 	inputStyle := lipgloss.NewStyle().
@@ -296,28 +331,28 @@ func (m tuiModel) View() string {
 		scrollIndicator = scrollIndicatorStyle.Render("↑ More messages above (PgUp/PgDn to scroll, Ctrl+Home for top) ↑") + "\n"
 	}
 
-	if m.showLogs {
+	if m.showNotifications {
 		// Split view with titles
-		chatTitle := titleStyle.Render("Chat")
-		logsTitle := titleStyle.Render("Logs")
+		chatTitle := titleStyle.Render("Chat & Logs")
+		notificationsTitle := titleStyle.Render("Notifications")
 
 		chatContent := chatTitle + "\n" + scrollIndicator + m.chatViewport.View()
-		logsContent := logsTitle + "\n" + m.logsViewport.View()
+		notificationsContent := notificationsTitle + "\n" + m.notificationsViewport.View()
 
 		chatView := chatStyle.
 			Width(m.chatViewport.Width + 4).
 			Height(m.chatViewport.Height + 2).
 			Render(chatContent)
 
-		logsView := logsStyle.
-			Width(m.logsViewport.Width + 4).
-			Height(m.logsViewport.Height + 2).
-			Render(logsContent)
+		notificationsView := notificationsStyle.
+			Width(m.notificationsViewport.Width + 4).
+			Height(m.notificationsViewport.Height + 2).
+			Render(notificationsContent)
 
 		content = lipgloss.JoinHorizontal(
 			lipgloss.Top,
 			chatView,
-			logsView,
+			notificationsView,
 		)
 	} else {
 		// Single chat view
@@ -343,7 +378,7 @@ func (m tuiModel) View() string {
 
 	// Input area
 	inputWidth := m.chatViewport.Width
-	if m.showLogs {
+	if m.showNotifications {
 		inputWidth = m.width - 4
 	}
 
@@ -401,5 +436,11 @@ func tuiSendError(err error) {
 func tuiQuit() {
 	if program != nil {
 		program.Send(quitMsg{})
+	}
+}
+
+func tuiSendNotification(server string, notification mcp.JSONRPCNotification) {
+	if program != nil {
+		program.Send(notificationMsg{server: server, notification: notification})
 	}
 }
