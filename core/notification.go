@@ -1,27 +1,30 @@
 package core
 
 import (
+	"context"
+	"encoding/json"
 	"fmt"
+	"log"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/mark3labs/mcp-go/mcp"
 )
 
 const (
-	notificationSubAgentSystemInstructions = "You are the agent responsible for handling notifications from different plugins." +
-		"You will receive a prompt which is the set of instructions what to do or not to do with the notification." +
-		"The prompt is a request from a user on how to handle the notification." +
-		"Based on these instructions, you will decide whether to process the notification or ignore it." +
-		" If you decide to process it, you will extract relevant information and take appropriate actions as per the instructions." +
-		" If you decide to ignore it, just do nothing." +
-		" You are free to call any accessible tools to make a final decision." +
-		" If you deside to provide some feedback on this notification, use the notification_feedback tool. " +
-		" Only use the notification_feedback tool to communicate important information to the user, if. auser asked to report or there is important event."
+	notificationSubAgentSystemInstructions = "You are the agent responsible for handling notifications from different plugins. " +
+		"You will receive a prompt with instructions on what to do with the notification. " +
+		"Based on these instructions, you will decide whether to process the notification or ignore it. " +
+		"If you decide to process it, extract relevant information and take appropriate actions as per the instructions. " +
+		"If you decide to ignore it, just do nothing. " +
+		"You are free to call any accessible tools to complete the task. " +
+		"IMPORTANT: When the user's instructions say 'tell me', 'report', 'summarize', 'notify me', or 'let me know', " +
+		"you MUST use the notification_feedback tool to communicate that information to the user."
 
-	notificationSubAgentFeedbackToolDescription = "Provide a message to the user in response to a notification. " +
-		"Use this tool to communicate important information to the user only if you think the user should be informed about something." +
-		"Call this to say or to tell or to show something to the user. A user will see the message you provide."
+	notificationSubAgentFeedbackToolDescription = "Send a message to the user about this notification. " +
+		"Use this tool when the user's instructions ask you to tell, report, summarize, or inform them about something. " +
+		"The user will see the message you provide. This is the ONLY way to communicate with the user."
 )
 
 // MonitoringStatus indicates whether a notification is being monitored for processing
@@ -247,4 +250,164 @@ func (n *Notification) FormatForDisplay() string {
 		sb.WriteString(fmt.Sprintf(" [%s]", n.ProcessingStatus))
 	}
 	return sb.String()
+}
+
+// notificationWithInstructions bundles a notification with its processing instructions
+type notificationWithInstructions struct {
+	notification Notification
+	instructions []string
+}
+
+// NotificationProcessor handles notifications using a single persistent agent with a queue
+type NotificationProcessor struct {
+	agent   *CleverChatty
+	queue   chan notificationWithInstructions
+	logger  *log.Logger
+	wg      sync.WaitGroup
+	stopped bool
+	mu      sync.Mutex
+}
+
+// NewNotificationProcessor creates a new notification processor
+// parentConfig is used as base config for the processing agent
+func NewNotificationProcessor(parentConfig CleverChattyConfig, ctx context.Context, logger *log.Logger, clientAgentID string) (*NotificationProcessor, error) {
+	// Create agent with notification-specific system instructions
+	config := parentConfig
+	config.SystemInstruction = notificationSubAgentSystemInstructions
+
+	agent, err := GetCleverChattyWithLogger(config, ctx, logger)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create notification processor agent: %w", err)
+	}
+
+	agent.ClientAgentID = clientAgentID
+	agent.processNotifications = false // Prevent notification chains
+
+	// Initialize the agent
+	if err := agent.Init(); err != nil {
+		return nil, fmt.Errorf("failed to initialize notification processor agent: %w", err)
+	}
+
+	// Register the feedback tool
+	err = agent.SetTool(CustomTool{
+		Name:        "notification_feedback",
+		Description: notificationSubAgentFeedbackToolDescription,
+		Arguments: []ToolArgument{
+			{
+				Name:        "message",
+				Type:        "string",
+				Description: "The message to provide to the user. It can be Markdown formatted.",
+				Required:    true,
+			},
+		},
+		Handler: func(ctx context.Context, args map[string]interface{}) (string, error) {
+			message := args["message"].(string)
+			logger.Printf("Notification feedback to user: %s", message)
+			return "Message delivered to user", nil
+		},
+	})
+	if err != nil {
+		agent.Finish()
+		return nil, fmt.Errorf("failed to register feedback tool: %w", err)
+	}
+
+	processor := &NotificationProcessor{
+		agent:  agent,
+		queue:  make(chan notificationWithInstructions, 100), // Buffer up to 100 notifications
+		logger: logger,
+	}
+
+	return processor, nil
+}
+
+// Start begins processing notifications from the queue
+func (p *NotificationProcessor) Start() {
+	p.wg.Add(1)
+	go func() {
+		defer p.wg.Done()
+		p.logger.Printf("Notification processor started")
+
+		for item := range p.queue {
+			p.process(item)
+		}
+
+		p.logger.Printf("Notification processor stopped")
+	}()
+}
+
+// Stop gracefully shuts down the processor
+func (p *NotificationProcessor) Stop() {
+	p.mu.Lock()
+	if p.stopped {
+		p.mu.Unlock()
+		return
+	}
+	p.stopped = true
+	p.mu.Unlock()
+
+	p.logger.Printf("Stopping notification processor, closing queue...")
+	close(p.queue)
+	p.wg.Wait()
+
+	p.logger.Printf("Finishing notification processor agent...")
+	if err := p.agent.Finish(); err != nil {
+		p.logger.Printf("Error finishing notification processor agent: %v", err)
+	}
+}
+
+// Enqueue adds a notification to the processing queue
+// Returns false if the processor is stopped or queue is full
+func (p *NotificationProcessor) Enqueue(notification Notification, instructions []string) bool {
+	p.mu.Lock()
+	if p.stopped {
+		p.mu.Unlock()
+		p.logger.Printf("Notification processor is stopped, dropping notification: %s", notification.Method)
+		return false
+	}
+	p.mu.Unlock()
+
+	select {
+	case p.queue <- notificationWithInstructions{notification: notification, instructions: instructions}:
+		p.logger.Printf("Notification enqueued: server=%s, method=%s", notification.ServerName, notification.Method)
+		return true
+	default:
+		p.logger.Printf("Notification queue full, dropping notification: %s", notification.Method)
+		return false
+	}
+}
+
+// QueueLength returns the current number of notifications waiting in the queue
+func (p *NotificationProcessor) QueueLength() int {
+	return len(p.queue)
+}
+
+// process handles a single notification
+func (p *NotificationProcessor) process(item notificationWithInstructions) {
+	notification := item.notification
+	instructions := item.instructions
+
+	p.logger.Printf("Processing notification: server=%s, method=%s", notification.ServerName, notification.Method)
+
+	// Serialize notification to JSON for the prompt
+	notificationJSON, err := json.Marshal(notification)
+	if err != nil {
+		p.logger.Printf("Error serializing notification to JSON: %v", err)
+		return
+	}
+
+	// Build the prompt with instructions and notification content
+	instructionsText := strings.Join(instructions, "\n")
+	prompt := fmt.Sprintf("Instructions from the user:\n%s\n\nNotification content:\n%s", instructionsText, string(notificationJSON))
+
+	p.logger.Printf("Notification prompt: %s", prompt)
+
+	// Prompt the agent
+	response, err := p.agent.Prompt(prompt)
+	if err != nil {
+		p.logger.Printf("Error processing notification: %v", err)
+		return
+	}
+
+	p.logger.Printf("Notification LLM response: %s", response)
+	p.logger.Printf("Notification processed successfully: server=%s, method=%s", notification.ServerName, notification.Method)
 }
