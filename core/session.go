@@ -2,6 +2,7 @@ package core
 
 import (
 	"context"
+	"errors"
 	"log"
 	"sync"
 	"time"
@@ -43,6 +44,18 @@ func (sm *SessionManager) SetNotificationCallback(callback NotificationCallback)
 	sm.notificationCallback = callback
 }
 
+// GetSession retrieves a session by ID. Returns nil if not found.
+func (sm *SessionManager) GetSession(id string) (*Session, error) {
+	sm.mutex.RLock()
+	defer sm.mutex.RUnlock()
+	session, ok := sm.sessions[id]
+	if !ok {
+		return nil, errors.New("session not found")
+	}
+	return session, nil
+}
+
+// GetOrCreateSession retrieves an existing session or creates a new one if it doesn't exist.
 func (sm *SessionManager) GetOrCreateSession(id string, clientAgentID string) (*Session, error) {
 	sm.mutex.RLock()
 	sm.logger.Printf("GetOrCreateSession called for ID: %s. There are %d active sessions", id, len(sm.sessions))

@@ -750,6 +750,28 @@ func runAsClientWithTUI(ctx context.Context, a2aClient *a2aclient.A2AClient, con
 	var runErr error
 	_, runErr = program.Run()
 
+	// Send /bye to server to terminate the session before cleanup
+	// This ensures the server releases resources immediately instead of waiting for timeout
+	if a2aClient != nil {
+		byeMessage := a2aprotocol.Message{
+			Role: a2aprotocol.MessageRoleUser,
+			Parts: []a2aprotocol.Part{
+				a2aprotocol.NewTextPart("/bye"),
+			},
+			ContextID: &contextID,
+			Metadata: map[string]any{
+				"agent_id": agentID,
+			},
+		}
+		byeParams := a2aprotocol.SendMessageParams{
+			Message: byeMessage,
+		}
+		// Use a short timeout context for the bye message
+		byeCtx, byeCancel := context.WithTimeout(context.Background(), 5*time.Second)
+		a2aClient.SendMessage(byeCtx, byeParams)
+		byeCancel()
+	}
+
 	// Cleanup
 	useTUIMode = false
 	tuiA2AClient = nil

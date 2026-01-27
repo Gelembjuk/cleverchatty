@@ -166,8 +166,6 @@ func (assistant *CleverChatty) Finish() error {
 			"error closing client %v",
 			err,
 		)
-	} else {
-		log.Printf("All clients closed")
 	}
 	return nil
 }

@@ -135,22 +135,28 @@ func (a *A2AServer) ProcessMessage(
 
 	a.Logger.Printf("Text message: %s", prompt)
 
-	session, err := a.SessionsManager.GetOrCreateSession(*message.ContextID, agentid) // Ensure session exists
-
-	if err != nil {
-		return nil, fmt.Errorf("failed to get or create session: %w", err)
-	}
-
 	if strings.HasPrefix(prompt, "/") {
 		if prompt == "/hello" {
 			// in fact this is a command to test the server and agentid (and auth in the future)
 			return a.buildTextMessageResponse("hello!"), nil
 		}
 		if prompt == "/quit" || prompt == "/exit" || prompt == "/bye" {
+			session, err := a.SessionsManager.GetSession(*message.ContextID) // Ensure session exists
+
+			if err != nil {
+				return nil, fmt.Errorf("failed to get session: %w", err)
+			}
+
 			a.Logger.Printf("Received exit command, stopping server, removing session ID: %s", session.ID)
 			a.SessionsManager.FinishSession(session.ID) // Finish the session
 			return a.buildTextMessageResponse("Bye!"), nil
 		}
+	}
+
+	session, err := a.SessionsManager.GetOrCreateSession(*message.ContextID, agentid) // Ensure session exists
+
+	if err != nil {
+		return nil, fmt.Errorf("failed to get or create session: %w", err)
 	}
 
 	if !options.Streaming {
@@ -503,9 +509,9 @@ func (a *A2AServer) Start() error {
 	a.server, err = a2aserver.NewA2AServer(
 		a.agentCard(),
 		taskManager,
-		a2aserver.WithReadTimeout(0),   // No read timeout for persistent connections
-		a2aserver.WithWriteTimeout(0),  // No write timeout for streaming responses
-		a2aserver.WithIdleTimeout(0),   // No idle timeout for long-lived connections
+		a2aserver.WithReadTimeout(0),  // No read timeout for persistent connections
+		a2aserver.WithWriteTimeout(0), // No write timeout for streaming responses
+		a2aserver.WithIdleTimeout(0),  // No idle timeout for long-lived connections
 	)
 	if err != nil {
 		return fmt.Errorf("failed to create server: %w", err)

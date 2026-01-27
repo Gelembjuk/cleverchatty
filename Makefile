@@ -1,7 +1,7 @@
 .PHONY: all cc clean core cli server dev_tools
 
 # Build cleverchatty CLI and server
-cc: cli server
+cc: core cli server
 
 # Build everything
 all: cc dev_tools
