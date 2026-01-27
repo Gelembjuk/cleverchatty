@@ -2,6 +2,7 @@ package core
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"log"
 	"strings"
@@ -16,14 +17,16 @@ import (
 )
 
 type CleverChatty struct {
-	context       context.Context
-	ClientAgentID string
-	config        CleverChattyConfig
-	logger        *log.Logger
-	provider      llm.Provider
-	toolsHost     *ToolsHost
-	messages      []history.HistoryMessage
-	Callbacks     UICallbacks
+	context                 context.Context
+	ClientAgentID           string
+	config                  CleverChattyConfig
+	logger                  *log.Logger
+	provider                llm.Provider
+	toolsHost               *ToolsHost
+	messages                []history.HistoryMessage
+	Callbacks               UICallbacks
+	subAgents               map[string]*CleverChatty
+	processNotifications    bool // When false, notifications are ignored (used for subagents)
 }
 
 func GetCleverChatty(config CleverChattyConfig, ctx context.Context) (*CleverChatty, error) {
@@ -48,6 +51,10 @@ func GetCleverChattyWithLogger(config CleverChattyConfig, ctx context.Context, l
 	assistant.logger = logger
 
 	assistant.messages = make([]history.HistoryMessage, 0)
+
+	assistant.subAgents = make(map[string]*CleverChatty)
+
+	assistant.processNotifications = true // Enable notification processing by default
 
 	assistant.Callbacks = UICallbacks{}
 
@@ -106,8 +113,68 @@ func (assistant *CleverChatty) SetReverseMCPClient(client ReverseMCPClient) {
 
 // SetNotificationCallback sets a callback for notifications from all MCP servers.
 // The callback receives a unified Notification structure instead of the raw MCP notification.
+// If a notification is monitored and has instructions configured, a subagent will be
+// automatically spawned to process it (unless processNotifications is false).
 func (assistant *CleverChatty) SetNotificationCallback(callback NotificationCallback) {
-	assistant.toolsHost.SetNotificationCallback(callback)
+	assistant.logger.Printf("SetNotificationCallback called, processNotifications=%v", assistant.processNotifications)
+
+	// Create a wrapper callback that handles subagent processing for monitored notifications
+	wrappedCallback := func(notification Notification) {
+		assistant.logger.Printf("Notification wrapper received: server=%s, method=%s, monitored=%v",
+			notification.ServerName, notification.Method, notification.IsMonitored())
+
+		// Only process notifications with subagents if enabled (disabled for subagents to prevent chains)
+		if assistant.processNotifications && notification.IsMonitored() {
+			// Get the server config to retrieve instructions
+			if serverConfig, ok := assistant.config.ToolsServers[notification.ServerName]; ok {
+				if instructions := serverConfig.GetNotificationInstructions(notification.Method); instructions != nil && len(instructions) > 0 {
+					// Process the notification with a subagent
+					assistant.ProcessNotificationWithSubagent(notification, instructions)
+				}
+			}
+		}
+
+		// Always call the original callback
+		if callback != nil {
+			assistant.logger.Printf("Calling original notification callback for server=%s", notification.ServerName)
+			callback(notification)
+		} else {
+			assistant.logger.Printf("Original notification callback is nil!")
+		}
+	}
+
+	assistant.toolsHost.SetNotificationCallback(wrappedCallback)
+}
+
+// Get or create subagent with given alias
+func (assistant *CleverChatty) getSubagent(alias string) (*CleverChatty, error) {
+	subAgent, err := GetCleverChattyWithLogger(assistant.config, assistant.context, assistant.logger)
+	if err != nil {
+		return nil, err
+	}
+
+	subAgent.ClientAgentID = assistant.ClientAgentID
+	subAgent.processNotifications = false // Disable notification processing for subagents
+
+	if alias == "" {
+		alias = generateRandomString(16)
+	}
+
+	assistant.subAgents[alias] = subAgent
+
+	return subAgent, nil
+}
+
+// Get or create subagent with given alias and custom instruction
+func (assistant *CleverChatty) getSubagentWithInstructions(alias string, instruction string) (*CleverChatty, error) {
+	subAgent, err := assistant.getSubagent(alias)
+	if err != nil {
+		return nil, err
+	}
+
+	subAgent.config.SystemInstruction = instruction
+
+	return subAgent, nil
 }
 
 // Add new function to create provider
@@ -158,8 +225,32 @@ func (assistant CleverChatty) createProvider(ctx context.Context, modelString st
 		return nil, fmt.Errorf("unsupported provider: %s", provider)
 	}
 }
+func (assistant *CleverChatty) finishSubagent(alias string) error {
+	subAgent, exists := assistant.subAgents[alias]
+	if !exists {
+		return fmt.Errorf("subagent with alias %s does not exist", alias)
+	}
+
+	err := subAgent.Finish()
+	if err != nil {
+		return err
+	}
+
+	delete(assistant.subAgents, alias)
+	return nil
+}
 
 func (assistant *CleverChatty) Finish() error {
+	// Finish all subagents
+	for alias, subAgent := range assistant.subAgents {
+		assistant.logger.Printf("Finishing subagent with alias: %s", alias)
+		err := subAgent.Finish()
+		if err != nil {
+			assistant.logger.Printf("Error finishing subagent %s: %v", alias, err)
+		}
+	}
+	assistant.subAgents = make(map[string]*CleverChatty)
+
 	err := assistant.toolsHost.Close()
 	if err != nil {
 		return fmt.Errorf(
@@ -180,4 +271,55 @@ func (assistant *CleverChatty) GetToolsInfo() []ServerInfo {
 
 func (assistant *CleverChatty) GetMessages() []history.HistoryMessage {
 	return assistant.messages
+}
+
+// ProcessNotificationWithSubagent handles a monitored notification by creating a subagent
+// that processes the notification based on the provided instructions.
+// This method runs in a goroutine and logs the result when complete.
+func (assistant *CleverChatty) ProcessNotificationWithSubagent(notification Notification, instructions []string) {
+	go func() {
+		// Serialize notification to JSON for the prompt
+		notificationJSON, err := json.Marshal(notification)
+		if err != nil {
+			assistant.logger.Printf("Error serializing notification to JSON: %v", err)
+			return
+		}
+
+		// Build the prompt with instructions and notification content
+		instructionsText := strings.Join(instructions, "\n")
+		prompt := fmt.Sprintf("Instructions:\n%s\n\nNotification content:\n%s", instructionsText, string(notificationJSON))
+
+		// Create a subagent with notification-specific system instructions
+		subAgent, err := assistant.getSubagentWithInstructions("", notificationSubAgentSystemInstructions)
+		if err != nil {
+			assistant.logger.Printf("Error creating subagent for notification processing: %v", err)
+			return
+		}
+
+		// Initialize the subagent
+		err = subAgent.Init()
+		if err != nil {
+			assistant.logger.Printf("Error initializing subagent for notification processing: %v", err)
+			return
+		}
+
+		// Ensure cleanup when done
+		defer func() {
+			if finishErr := subAgent.Finish(); finishErr != nil {
+				assistant.logger.Printf("Error finishing notification subagent: %v", finishErr)
+			}
+		}()
+
+		assistant.logger.Printf("Processing notification with subagent. Server: %s, Method: %s", notification.ServerName, notification.Method)
+
+		// Prompt the subagent
+		response, err := subAgent.Prompt(prompt)
+		if err != nil {
+			assistant.logger.Printf("Error processing notification with subagent: %v", err)
+			return
+		}
+
+		// Log the response
+		assistant.logger.Printf("Notification subagent response for [%s][%s]: %s", notification.ServerName, notification.Method, response)
+	}()
 }

@@ -8,6 +8,16 @@ import (
 	"github.com/mark3labs/mcp-go/mcp"
 )
 
+const (
+	notificationSubAgentSystemInstructions = "You are the agent responsible for handling notifications from the MCP server." +
+		"You will receive a prompt which is the set of instructions what to do or not to do with the notification." +
+		"Based on these instructions, you will decide whether to process the notification or ignore it." +
+		" If you decide to process it, you will extract relevant information and take appropriate actions as per the instructions." +
+		" If you decide to ignore it, you MUST return EXACTLY one word: 'ignore'." +
+		" You are free to call any accessible tools to make a final decision." +
+		" Always ensure to follow the instructions provided in the prompt carefully."
+)
+
 // MonitoringStatus indicates whether a notification is being monitored for processing
 type MonitoringStatus string
 

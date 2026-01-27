@@ -136,10 +136,6 @@ func (a *A2AServer) ProcessMessage(
 	a.Logger.Printf("Text message: %s", prompt)
 
 	if strings.HasPrefix(prompt, "/") {
-		if prompt == "/hello" {
-			// in fact this is a command to test the server and agentid (and auth in the future)
-			return a.buildTextMessageResponse("hello!"), nil
-		}
 		if prompt == "/quit" || prompt == "/exit" || prompt == "/bye" {
 			session, err := a.SessionsManager.GetSession(*message.ContextID) // Ensure session exists
 
@@ -154,6 +150,11 @@ func (a *A2AServer) ProcessMessage(
 	}
 
 	session, err := a.SessionsManager.GetOrCreateSession(*message.ContextID, agentid) // Ensure session exists
+
+	if prompt == "/hello" {
+		// in fact this is a command to test the server and agentid (and auth in the future)
+		return a.buildTextMessageResponse("hello!"), nil
+	}
 
 	if err != nil {
 		return nil, fmt.Errorf("failed to get or create session: %w", err)
