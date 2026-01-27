@@ -17,16 +17,16 @@ import (
 )
 
 type CleverChatty struct {
-	context                 context.Context
-	ClientAgentID           string
-	config                  CleverChattyConfig
-	logger                  *log.Logger
-	provider                llm.Provider
-	toolsHost               *ToolsHost
-	messages                []history.HistoryMessage
-	Callbacks               UICallbacks
-	subAgents               map[string]*CleverChatty
-	processNotifications    bool // When false, notifications are ignored (used for subagents)
+	context              context.Context
+	ClientAgentID        string
+	config               CleverChattyConfig
+	logger               *log.Logger
+	provider             llm.Provider
+	toolsHost            *ToolsHost
+	messages             []history.HistoryMessage
+	Callbacks            UICallbacks
+	subAgents            map[string]*CleverChatty
+	processNotifications bool // When false, notifications are ignored (used for subagents)
 }
 
 func GetCleverChatty(config CleverChattyConfig, ctx context.Context) (*CleverChatty, error) {
@@ -175,6 +175,23 @@ func (assistant *CleverChatty) getSubagentWithInstructions(alias string, instruc
 	subAgent.config.SystemInstruction = instruction
 
 	return subAgent, nil
+}
+
+// SetTool registers a custom tool with the assistant.
+// The tool will be available to the LLM alongside MCP and A2A tools.
+// Returns an error if the tool definition is invalid.
+func (assistant *CleverChatty) SetTool(tool CustomTool) error {
+	if assistant.toolsHost == nil {
+		return fmt.Errorf("toolsHost not initialized, call Init() first")
+	}
+	return assistant.toolsHost.AddCustomTool(tool)
+}
+
+// RemoveTool removes a custom tool by name
+func (assistant *CleverChatty) RemoveTool(name string) {
+	if assistant.toolsHost != nil {
+		assistant.toolsHost.RemoveCustomTool(name)
+	}
 }
 
 // Add new function to create provider
