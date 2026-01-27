@@ -799,7 +799,10 @@ func runAsClient(ctx context.Context) error {
 		return fmt.Errorf("error checking server capabilities: %v", err)
 	}
 
-	err = sendHelloMessage(ctx, server, agentid)
+	// context id
+	contextID := fmt.Sprintf("session-%d-%s", time.Now().UnixNano(), uuid.New().String())
+
+	err = sendHelloMessage(ctx, server, agentid, &contextID)
 	if err != nil {
 		// If the server does not support CleverChatty AI chat, we return an error
 		// probably, agentid is not set or is wrong
@@ -823,9 +826,6 @@ func runAsClient(ctx context.Context) error {
 	if err := updateRenderer(); err != nil {
 		return fmt.Errorf("error initializing renderer: %v", err)
 	}
-
-	// context id
-	contextID := fmt.Sprintf("session-%d-%s", time.Now().UnixNano(), uuid.New().String())
 
 	// Always use TUI in client mode
 	return runAsClientWithTUI(ctx, a2aClient, contextID, agentid)

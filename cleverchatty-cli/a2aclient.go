@@ -70,7 +70,7 @@ func checkServerIsCleverChatty(serverURL string) (bool, error) {
 	}
 	return false, nil // Not a CleverChatty server
 }
-func sendHelloMessage(ctx context.Context, serverURL string, agentid string) error {
+func sendHelloMessage(ctx context.Context, serverURL string, agentid string, ContextID *string) error {
 	a2aClient, err := a2aclient.NewA2AClient(serverURL)
 	if err != nil {
 		return fmt.Errorf("error creating A2A client: %v", err)
@@ -81,6 +81,7 @@ func sendHelloMessage(ctx context.Context, serverURL string, agentid string) err
 			Parts: []a2aprotocol.Part{
 				a2aprotocol.NewTextPart("/hello"),
 			},
+			ContextID: ContextID,
 			Metadata: map[string]any{
 				"agent_id": agentid,
 			},

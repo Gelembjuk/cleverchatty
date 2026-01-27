@@ -9,13 +9,19 @@ import (
 )
 
 const (
-	notificationSubAgentSystemInstructions = "You are the agent responsible for handling notifications from the MCP server." +
+	notificationSubAgentSystemInstructions = "You are the agent responsible for handling notifications from different plugins." +
 		"You will receive a prompt which is the set of instructions what to do or not to do with the notification." +
+		"The prompt is a request from a user on how to handle the notification." +
 		"Based on these instructions, you will decide whether to process the notification or ignore it." +
 		" If you decide to process it, you will extract relevant information and take appropriate actions as per the instructions." +
-		" If you decide to ignore it, you MUST return EXACTLY one word: 'ignore'." +
+		" If you decide to ignore it, just do nothing." +
 		" You are free to call any accessible tools to make a final decision." +
-		" Always ensure to follow the instructions provided in the prompt carefully."
+		" If you deside to provide some feedback on this notification, use the notification_feedback tool. " +
+		" Only use the notification_feedback tool to communicate important information to the user, if. auser asked to report or there is important event."
+
+	notificationSubAgentFeedbackToolDescription = "Provide a message to the user in response to a notification. " +
+		"Use this tool to communicate important information to the user only if you think the user should be informed about something." +
+		"Call this to say or to tell or to show something to the user. A user will see the message you provide."
 )
 
 // MonitoringStatus indicates whether a notification is being monitored for processing

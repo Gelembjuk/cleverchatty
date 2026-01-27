@@ -140,7 +140,7 @@ func (a *A2AServer) ProcessMessage(
 			session, err := a.SessionsManager.GetSession(*message.ContextID) // Ensure session exists
 
 			if err != nil {
-				return nil, fmt.Errorf("failed to get session: %w", err)
+				return nil, fmt.Errorf("failed to get session: %w. Session ID: %s", err, *message.ContextID)
 			}
 
 			a.Logger.Printf("Received exit command, stopping server, removing session ID: %s", session.ID)

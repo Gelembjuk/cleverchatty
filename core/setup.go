@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log"
 	"strings"
+	"sync"
 
 	"github.com/gelembjuk/cleverchatty/core/history"
 	"github.com/gelembjuk/cleverchatty/core/llm"
@@ -26,7 +27,9 @@ type CleverChatty struct {
 	messages             []history.HistoryMessage
 	Callbacks            UICallbacks
 	subAgents            map[string]*CleverChatty
-	processNotifications bool // When false, notifications are ignored (used for subagents)
+	subAgentsMu          sync.Mutex // Protects subAgents map for concurrent access
+	processNotifications bool       // When false, notifications are ignored (used for subagents)
+	onFinishCallback     func()     // Called when Finish() is invoked, used to notify parent
 }
 
 func GetCleverChatty(config CleverChattyConfig, ctx context.Context) (*CleverChatty, error) {
@@ -160,7 +163,17 @@ func (assistant *CleverChatty) getSubagent(alias string) (*CleverChatty, error) 
 		alias = generateRandomString(16)
 	}
 
+	assistant.subAgentsMu.Lock()
 	assistant.subAgents[alias] = subAgent
+	assistant.subAgentsMu.Unlock()
+
+	// Set callback to remove subagent from parent's map when it finishes itself
+	subAgent.onFinishCallback = func() {
+		assistant.subAgentsMu.Lock()
+		delete(assistant.subAgents, alias)
+		assistant.subAgentsMu.Unlock()
+		assistant.logger.Printf("Subagent %s removed from parent after self-finish", alias)
+	}
 
 	return subAgent, nil
 }
@@ -243,30 +256,48 @@ func (assistant CleverChatty) createProvider(ctx context.Context, modelString st
 	}
 }
 func (assistant *CleverChatty) finishSubagent(alias string) error {
+	assistant.subAgentsMu.Lock()
 	subAgent, exists := assistant.subAgents[alias]
 	if !exists {
+		assistant.subAgentsMu.Unlock()
 		return fmt.Errorf("subagent with alias %s does not exist", alias)
 	}
+
+	// Clear callback since parent is explicitly removing the subagent
+	subAgent.onFinishCallback = nil
+	delete(assistant.subAgents, alias)
+	assistant.subAgentsMu.Unlock()
 
 	err := subAgent.Finish()
 	if err != nil {
 		return err
 	}
 
-	delete(assistant.subAgents, alias)
 	return nil
 }
 
 func (assistant *CleverChatty) Finish() error {
-	// Finish all subagents
+	assistant.subAgentsMu.Lock()
+	assistant.logger.Printf("Finishing CleverChatty assistant with %d subagents", len(assistant.subAgents))
+
+	// Collect subagents to finish (avoid holding lock during Finish calls)
+	subAgentsToFinish := make(map[string]*CleverChatty)
 	for alias, subAgent := range assistant.subAgents {
+		// Clear the callback to prevent it from trying to modify the map
+		subAgent.onFinishCallback = nil
+		subAgentsToFinish[alias] = subAgent
+	}
+	assistant.subAgents = make(map[string]*CleverChatty)
+	assistant.subAgentsMu.Unlock()
+
+	// Finish all subagents outside the lock
+	for alias, subAgent := range subAgentsToFinish {
 		assistant.logger.Printf("Finishing subagent with alias: %s", alias)
 		err := subAgent.Finish()
 		if err != nil {
 			assistant.logger.Printf("Error finishing subagent %s: %v", alias, err)
 		}
 	}
-	assistant.subAgents = make(map[string]*CleverChatty)
 
 	err := assistant.toolsHost.Close()
 	if err != nil {
@@ -275,6 +306,12 @@ func (assistant *CleverChatty) Finish() error {
 			err,
 		)
 	}
+
+	// Notify parent (if any) that this agent has finished
+	if assistant.onFinishCallback != nil {
+		assistant.onFinishCallback()
+	}
+
 	return nil
 }
 
@@ -304,7 +341,7 @@ func (assistant *CleverChatty) ProcessNotificationWithSubagent(notification Noti
 
 		// Build the prompt with instructions and notification content
 		instructionsText := strings.Join(instructions, "\n")
-		prompt := fmt.Sprintf("Instructions:\n%s\n\nNotification content:\n%s", instructionsText, string(notificationJSON))
+		prompt := fmt.Sprintf("Instructions from the user:\n%s\n\nNotification content:\n%s", instructionsText, string(notificationJSON))
 
 		// Create a subagent with notification-specific system instructions
 		subAgent, err := assistant.getSubagentWithInstructions("", notificationSubAgentSystemInstructions)
@@ -320,6 +357,26 @@ func (assistant *CleverChatty) ProcessNotificationWithSubagent(notification Noti
 			return
 		}
 
+		// Register a custom tool
+		err = subAgent.SetTool(CustomTool{
+			Name:        "notification_feedback",
+			Description: notificationSubAgentFeedbackToolDescription,
+			Arguments: []ToolArgument{
+				{
+					Name:        "message",
+					Type:        "string",
+					Description: "The message to provide to the user. It can be Markdown formatted.",
+					Required:    true,
+				},
+			},
+			Handler: func(ctx context.Context, args map[string]interface{}) (string, error) {
+				message := args["message"].(string)
+				// Your custom logic here
+				assistant.logger.Printf("Message to user: %s", message)
+				return "Okay", nil
+			},
+		})
+
 		// Ensure cleanup when done
 		defer func() {
 			if finishErr := subAgent.Finish(); finishErr != nil {
@@ -327,16 +384,11 @@ func (assistant *CleverChatty) ProcessNotificationWithSubagent(notification Noti
 			}
 		}()
 
-		assistant.logger.Printf("Processing notification with subagent. Server: %s, Method: %s", notification.ServerName, notification.Method)
-
 		// Prompt the subagent
-		response, err := subAgent.Prompt(prompt)
+		_, err = subAgent.Prompt(prompt)
 		if err != nil {
 			assistant.logger.Printf("Error processing notification with subagent: %v", err)
 			return
 		}
-
-		// Log the response
-		assistant.logger.Printf("Notification subagent response for [%s][%s]: %s", notification.ServerName, notification.Method, response)
 	}()
 }

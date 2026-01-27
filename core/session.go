@@ -128,7 +128,7 @@ func (sm *SessionManager) StartCleanupLoop() {
 func (sm *SessionManager) FinishSession(id string) {
 	sm.mutex.Lock()
 	defer sm.mutex.Unlock()
-
+	
 	if session, ok := sm.sessions[id]; ok {
 		session.AI.Finish()
 		delete(sm.sessions, id)

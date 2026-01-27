@@ -205,10 +205,6 @@ func (host *ToolsHost) SetNotificationCallback(callback NotificationCallback) {
 			// Check if this notification method is monitored
 			if instructions := serverConfig.GetNotificationInstructions(mcpNotification.Method); instructions != nil {
 				notification.SetMonitored()
-				host.logger.Printf(
-					"Notification is monitored, instructions are: %v",
-					instructions,
-				)
 			}
 
 			wrapper.callback(notification)
