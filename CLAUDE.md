@@ -73,6 +73,50 @@ Model format: `provider:model_name` (e.g., `ollama:llama2:7b`, `anthropic:claude
 ### Notification System
 `core/notification.go` provides unified notification handling from MCP/A2A sources with monitoring and processing status tracking.
 
+#### Notification Processing Flow
+When an MCP server sends a notification:
+1. `ToolsHost` receives the raw MCP notification and converts it to a unified `Notification` struct
+2. If the notification matches configured monitoring rules (in `tools_servers[name].notification_instructions`), it's marked as "monitored"
+3. Monitored notifications are enqueued in `NotificationProcessor` for LLM-based processing
+4. The processor's dedicated agent evaluates the notification against user instructions
+5. If the agent determines the user should be notified, it calls the `notification_feedback` tool
+
+#### Agent Message Delivery
+The `notification_feedback` tool triggers the `AgentMessageCallback` chain:
+```
+notification_feedback tool called
+    ↓
+AgentMessageCallback (in NotificationProcessor)
+    ↓
+Closure in CleverChatty.SetNotificationCallback:
+  1. Adds message to assistant.messages via history.NewAgentNotificationMessage()
+  2. Calls assistant.agentMessageCallback
+    ↓
+SessionManager.agentMessageCallback
+    ↓
+A2AServer.BroadcastAgentMessage() - sends "agent_message" event to all subscribers
+    ↓
+CLI receives event and displays in chat view (tuiSendAgentMessage)
+```
+
+#### Key Types
+- `NotificationCallback func(notification Notification)` - for raw notification events
+- `AgentMessageCallback func(message string)` - for processed agent messages to user
+- `NotificationProcessor` - queue-based processor with dedicated LLM agent
+
+#### Configuration Example
+```json
+{
+  "tools_servers": {
+    "email-server": {
+      "notification_instructions": {
+        "notifications/message": ["Tell me if there's an urgent email"]
+      }
+    }
+  }
+}
+```
+
 ## Configuration
 
 JSON config file `cleverchatty_config.json` with:
