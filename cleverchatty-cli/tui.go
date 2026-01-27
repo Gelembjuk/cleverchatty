@@ -18,6 +18,9 @@ type logMsg string
 type notificationMsg struct {
 	notification cleverchatty.Notification
 }
+type agentMessageMsg struct {
+	message string
+}
 type spinnerMsg string
 type clearSpinnerMsg struct{}
 type errorMsg error
@@ -225,6 +228,21 @@ func (m tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if !strings.HasSuffix(styledText, "\n") {
 			m.chatContent.WriteString("\n")
 		}
+		m.chatViewport.SetContent(m.chatContent.String())
+		m.chatViewport.GotoBottom()
+
+	case agentMessageMsg:
+		// Format agent message for chat display
+		separator := separatorStyle.Render("─────────────────────────────────────────────────")
+		agentLabel := lipgloss.NewStyle().Foreground(tokyoPurple).Bold(true).Render("🤖 Agent (Notification):")
+		messageStyle := lipgloss.NewStyle().Foreground(tokyoFg)
+
+		text := fmt.Sprintf("\n%s\n%s\n%s\n", separator, agentLabel, messageStyle.Render(msg.message))
+
+		if m.ready && m.chatViewport.Width > 0 {
+			text = wordwrap.String(text, m.chatViewport.Width)
+		}
+		m.chatContent.WriteString(text)
 		m.chatViewport.SetContent(m.chatContent.String())
 		m.chatViewport.GotoBottom()
 
@@ -455,5 +473,11 @@ func tuiQuit() {
 func tuiSendNotification(notification cleverchatty.Notification) {
 	if program != nil {
 		program.Send(notificationMsg{notification: notification})
+	}
+}
+
+func tuiSendAgentMessage(message string) {
+	if program != nil {
+		program.Send(agentMessageMsg{message: message})
 	}
 }

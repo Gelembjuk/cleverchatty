@@ -589,6 +589,21 @@ func handleNotificationEvent(event a2aprotocol.StreamingMessageEvent) {
 					return
 				}
 
+				// Handle agent messages (from notification processor)
+				if textPart.Text == "agent_message" && len(e.Status.Message.Parts) >= 2 {
+					message := ""
+					if part, ok := e.Status.Message.Parts[1].(*a2aprotocol.TextPart); ok {
+						message = part.Text
+					}
+
+					if useTUIMode && program != nil {
+						tuiSendAgentMessage(message)
+					} else {
+						fmt.Printf("\n🤖 Agent: %s\n\n", message)
+					}
+					return
+				}
+
 				if textPart.Text == "mcp_notification" && len(e.Status.Message.Parts) >= 3 {
 					// Extract notification details from the A2A stream
 					serverName := ""

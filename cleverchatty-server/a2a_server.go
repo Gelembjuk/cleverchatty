@@ -454,6 +454,45 @@ func (a *A2AServer) removeNotificationSubscription(contextID string) {
 	}
 }
 
+// BroadcastAgentMessage broadcasts an agent-generated message to all subscribed A2A clients
+func (a *A2AServer) BroadcastAgentMessage(message string) {
+	a.notificationSubsMux.RLock()
+	defer a.notificationSubsMux.RUnlock()
+
+	if len(a.notificationSubs) == 0 {
+		return
+	}
+
+	a.Logger.Printf("Broadcasting agent message to %d subscribers: %s", len(a.notificationSubs), message)
+
+	for contextID, subscriber := range a.notificationSubs {
+		agentMsgEvent := a2aprotocol.StreamingMessageEvent{
+			Result: &a2aprotocol.TaskStatusUpdateEvent{
+				TaskID:    "agent_message_" + uuid.New().String(),
+				ContextID: contextID,
+				Kind:      "status-update",
+				Status: a2aprotocol.TaskStatus{
+					State: a2aprotocol.TaskStateWorking,
+					Message: &a2aprotocol.Message{
+						MessageID: uuid.New().String(),
+						Kind:      "message",
+						Role:      a2aprotocol.MessageRoleAgent,
+						Parts: []a2aprotocol.Part{
+							a2aprotocol.NewTextPart("agent_message"),
+							a2aprotocol.NewTextPart(message),
+						},
+					},
+				},
+			},
+		}
+
+		err := subscriber.Send(agentMsgEvent)
+		if err != nil {
+			a.Logger.Printf("Failed to send agent message to context %s: %v", contextID, err)
+		}
+	}
+}
+
 // BroadcastNotification broadcasts a notification to all subscribed A2A clients
 func (a *A2AServer) BroadcastNotification(notification cleverchatty.Notification) {
 	a.notificationSubsMux.RLock()

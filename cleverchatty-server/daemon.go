@@ -229,6 +229,12 @@ func runServer() error {
 			a2aServer.BroadcastNotification(notification)
 		})
 		logger.Println("MCP notification broadcasting to A2A clients enabled.")
+
+		// Set agent message callback to broadcast agent messages to A2A clients
+		sessions_manager.SetAgentMessageCallback(func(message string) {
+			a2aServer.BroadcastAgentMessage(message)
+		})
+		logger.Println("Agent message broadcasting to A2A clients enabled.")
 	}
 
 	// Initialize Reverse MCP connector if enabled

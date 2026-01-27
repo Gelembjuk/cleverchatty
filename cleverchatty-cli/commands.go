@@ -37,9 +37,13 @@ func handleSlashCommand(prompt string, cleverChattyObject cleverchatty.CleverCha
 	case "/servers":
 		handleServersCommand(cleverChattyObject)
 		return true, nil
-	case "/quit":
+	case "/quit", "/bye", "/exit":
 		tuiPrint("\nGoodbye!\n")
-		defer os.Exit(0)
+		if useTUIMode {
+			tuiQuit()
+		} else {
+			os.Exit(0)
+		}
 		return true, nil
 	default:
 		tuiPrint(errorStyle.Render("Unknown command: "+prompt) + "\nType /help to see available commands\n\n")
@@ -65,7 +69,7 @@ func handleSlashCommandAsClient(prompt string, a2aClient a2aclient.A2AClient, ct
 	case "/version":
 		handleVersionCommand()
 		return true, nil
-	case "/quit":
+	case "/quit", "/bye", "/exit":
 		taskParams := a2aprotocol.SendMessageParams{
 			Message: a2aprotocol.Message{
 				Role: a2aprotocol.MessageRoleUser,
@@ -81,8 +85,12 @@ func handleSlashCommandAsClient(prompt string, a2aClient a2aclient.A2AClient, ct
 
 		a2aClient.SendMessage(ctx, taskParams)
 
-		fmt.Println("\nGoodbye!")
-		defer os.Exit(0)
+		tuiPrint("\nGoodbye!\n")
+		if useTUIMode {
+			tuiQuit()
+		} else {
+			os.Exit(0)
+		}
 		return true, nil
 	default:
 		fmt.Printf("%s\nType /help to see available commands\n\n",
@@ -105,7 +113,7 @@ func handleHelpCommand() {
 	markdown.WriteString("- **/tools**: List all available tools\n")
 	markdown.WriteString("- **/servers**: List configured MCP servers\n")
 	markdown.WriteString("- **/history**: Display conversation history\n")
-	markdown.WriteString("- **/quit**: Exit the application\n")
+	markdown.WriteString("- **/quit**, **/bye**, **/exit**: Exit the application\n")
 	markdown.WriteString("\n## Navigation\n\n")
 	markdown.WriteString("- **PgUp/PgDn**: Scroll through chat history\n")
 	markdown.WriteString("- **Ctrl+Home/End**: Jump to top/bottom\n")

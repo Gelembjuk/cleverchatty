@@ -30,6 +30,7 @@ type CleverChatty struct {
 	processNotifications  bool       // When false, notifications are ignored (used for subagents)
 	onFinishCallback      func()     // Called when Finish() is invoked, used to notify parent
 	notificationProcessor *NotificationProcessor
+	agentMessageCallback  AgentMessageCallback // Callback for agent-generated messages
 }
 
 func GetCleverChatty(config CleverChattyConfig, ctx context.Context) (*CleverChatty, error) {
@@ -114,6 +115,11 @@ func (assistant *CleverChatty) SetReverseMCPClient(client ReverseMCPClient) {
 	}
 }
 
+// SetAgentMessageCallback sets the callback for agent-generated messages
+func (assistant *CleverChatty) SetAgentMessageCallback(callback AgentMessageCallback) {
+	assistant.agentMessageCallback = callback
+}
+
 // SetNotificationCallback sets a callback for notifications from all MCP servers.
 // The callback receives a unified Notification structure instead of the raw MCP notification.
 // If a notification is monitored and has instructions configured, it will be queued
@@ -123,7 +129,19 @@ func (assistant *CleverChatty) SetNotificationCallback(callback NotificationCall
 
 	// Initialize notification processor if we need to process notifications
 	if assistant.processNotifications && assistant.notificationProcessor == nil {
-		processor, err := NewNotificationProcessor(assistant.config, assistant.context, assistant.logger, assistant.ClientAgentID)
+		// Create agent message callback that adds to history and forwards
+		agentMsgCallback := func(message string) {
+			// Add to this CleverChatty's history
+			assistant.messages = append(assistant.messages, history.NewAgentNotificationMessage(message))
+			assistant.logger.Printf("Agent message added to history: %s", message)
+
+			// Forward to external callback if set
+			if assistant.agentMessageCallback != nil {
+				assistant.agentMessageCallback(message)
+			}
+		}
+
+		processor, err := NewNotificationProcessor(assistant.config, assistant.context, assistant.logger, assistant.ClientAgentID, agentMsgCallback)
 		if err != nil {
 			assistant.logger.Printf("Failed to create notification processor: %v", err)
 		} else {

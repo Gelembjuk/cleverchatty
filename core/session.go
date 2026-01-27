@@ -22,6 +22,7 @@ type SessionManager struct {
 	logger               *log.Logger
 	reverseMCPClient     ReverseMCPClient
 	notificationCallback NotificationCallback
+	agentMessageCallback AgentMessageCallback
 }
 
 func NewSessionManager(config *CleverChattyConfig, ctx context.Context, logger *log.Logger) *SessionManager {
@@ -42,6 +43,11 @@ func (sm *SessionManager) SetReverseMCPClient(client ReverseMCPClient) {
 // The callback receives a unified Notification structure instead of the raw MCP notification.
 func (sm *SessionManager) SetNotificationCallback(callback NotificationCallback) {
 	sm.notificationCallback = callback
+}
+
+// SetAgentMessageCallback sets the callback for agent-generated messages
+func (sm *SessionManager) SetAgentMessageCallback(callback AgentMessageCallback) {
+	sm.agentMessageCallback = callback
 }
 
 // GetSession retrieves a session by ID. Returns nil if not found.
@@ -81,6 +87,11 @@ func (sm *SessionManager) GetOrCreateSession(id string, clientAgentID string) (*
 	// Set reverse MCP client if available
 	if sm.reverseMCPClient != nil {
 		ai.SetReverseMCPClient(sm.reverseMCPClient)
+	}
+
+	// Set agent message callback if available
+	if sm.agentMessageCallback != nil {
+		ai.SetAgentMessageCallback(sm.agentMessageCallback)
 	}
 
 	// Set notification callback if available

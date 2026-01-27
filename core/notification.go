@@ -75,6 +75,10 @@ type Notification struct {
 // NotificationCallback is the callback function type for receiving notifications
 type NotificationCallback func(notification Notification)
 
+// AgentMessageCallback is called when the notification processor wants to
+// send a message to the user
+type AgentMessageCallback func(message string)
+
 // NewNotification creates a new Notification with default values
 func NewNotification(serverName, method string, params map[string]interface{}) Notification {
 	return Notification{
@@ -260,17 +264,18 @@ type notificationWithInstructions struct {
 
 // NotificationProcessor handles notifications using a single persistent agent with a queue
 type NotificationProcessor struct {
-	agent   *CleverChatty
-	queue   chan notificationWithInstructions
-	logger  *log.Logger
-	wg      sync.WaitGroup
-	stopped bool
-	mu      sync.Mutex
+	agent                *CleverChatty
+	queue                chan notificationWithInstructions
+	logger               *log.Logger
+	wg                   sync.WaitGroup
+	stopped              bool
+	mu                   sync.Mutex
+	agentMessageCallback AgentMessageCallback
 }
 
 // NewNotificationProcessor creates a new notification processor
 // parentConfig is used as base config for the processing agent
-func NewNotificationProcessor(parentConfig CleverChattyConfig, ctx context.Context, logger *log.Logger, clientAgentID string) (*NotificationProcessor, error) {
+func NewNotificationProcessor(parentConfig CleverChattyConfig, ctx context.Context, logger *log.Logger, clientAgentID string, agentMessageCallback AgentMessageCallback) (*NotificationProcessor, error) {
 	// Create agent with notification-specific system instructions
 	config := parentConfig
 	config.SystemInstruction = notificationSubAgentSystemInstructions
@@ -288,6 +293,13 @@ func NewNotificationProcessor(parentConfig CleverChattyConfig, ctx context.Conte
 		return nil, fmt.Errorf("failed to initialize notification processor agent: %w", err)
 	}
 
+	processor := &NotificationProcessor{
+		agent:                agent,
+		queue:                make(chan notificationWithInstructions, 100), // Buffer up to 100 notifications
+		logger:               logger,
+		agentMessageCallback: agentMessageCallback,
+	}
+
 	// Register the feedback tool
 	err = agent.SetTool(CustomTool{
 		Name:        "notification_feedback",
@@ -303,18 +315,18 @@ func NewNotificationProcessor(parentConfig CleverChattyConfig, ctx context.Conte
 		Handler: func(ctx context.Context, args map[string]interface{}) (string, error) {
 			message := args["message"].(string)
 			logger.Printf("Notification feedback to user: %s", message)
+
+			// Call the agent message callback to deliver the message
+			if processor.agentMessageCallback != nil {
+				processor.agentMessageCallback(message)
+			}
+
 			return "Message delivered to user", nil
 		},
 	})
 	if err != nil {
 		agent.Finish()
 		return nil, fmt.Errorf("failed to register feedback tool: %w", err)
-	}
-
-	processor := &NotificationProcessor{
-		agent:  agent,
-		queue:  make(chan notificationWithInstructions, 100), // Buffer up to 100 notifications
-		logger: logger,
 	}
 
 	return processor, nil
@@ -399,15 +411,11 @@ func (p *NotificationProcessor) process(item notificationWithInstructions) {
 	instructionsText := strings.Join(instructions, "\n")
 	prompt := fmt.Sprintf("Instructions from the user:\n%s\n\nNotification content:\n%s", instructionsText, string(notificationJSON))
 
-	p.logger.Printf("Notification prompt: %s", prompt)
-
 	// Prompt the agent
-	response, err := p.agent.Prompt(prompt)
+	_, err = p.agent.Prompt(prompt)
 	if err != nil {
 		p.logger.Printf("Error processing notification: %v", err)
 		return
 	}
 
-	p.logger.Printf("Notification LLM response: %s", response)
-	p.logger.Printf("Notification processed successfully: server=%s, method=%s", notification.ServerName, notification.Method)
 }
