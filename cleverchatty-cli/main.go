@@ -388,9 +388,15 @@ func composeSinglePromptCallbacks() cleverchatty.UICallbacks {
 
 // runSinglePromptStandalone initializes CleverChatty locally, sends a single prompt, prints the response and exits.
 func runSinglePromptStandalone(ctx context.Context, config *cleverchatty.CleverChattyConfig) error {
-	// If log destination is stdout, redirect to stderr so it doesn't mix with the response
-	if config.LogFilePath == "" || config.LogFilePath == "stdout" {
-		config.LogFilePath = "stderr"
+	// Suppress logs unless debug mode is enabled
+	if config.DebugMode {
+		// In debug mode, send logs to stderr so they don't mix with the response on stdout
+		if config.LogFilePath == "" || config.LogFilePath == "stdout" {
+			config.LogFilePath = "stderr"
+		}
+	} else {
+		// In normal mode, discard logs entirely
+		config.LogFilePath = ""
 	}
 
 	logger, err := cleverchatty.InitLogger(config.LogFilePath, config.DebugMode)

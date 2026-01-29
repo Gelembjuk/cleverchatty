@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 
 	"github.com/gelembjuk/cleverchatty/core/history"
 	"github.com/mark3labs/mcp-go/mcp"
@@ -40,8 +41,10 @@ const (
 )
 
 type FileCache struct {
-	workDir string
-	logger  *log.Logger
+	workDir      string
+	logger       *log.Logger
+	trackedFiles []string
+	mu           sync.Mutex
 }
 
 func NewFileCache(workDir string, logger *log.Logger) *FileCache {
@@ -77,8 +80,27 @@ func (fc *FileCache) SaveContent(data []byte, mimeType string) (string, error) {
 	}
 
 	relPath := filepath.Join("tmp", name)
+	fc.mu.Lock()
+	fc.trackedFiles = append(fc.trackedFiles, path)
+	fc.mu.Unlock()
 	fc.logger.Printf("FileCache: saved %d bytes to %s (mime: %s)", len(data), relPath, mimeType)
 	return relPath, nil
+}
+
+// Cleanup removes all temp files created during this session.
+func (fc *FileCache) Cleanup() {
+	fc.mu.Lock()
+	files := fc.trackedFiles
+	fc.trackedFiles = nil
+	fc.mu.Unlock()
+
+	for _, path := range files {
+		if err := os.Remove(path); err != nil {
+			fc.logger.Printf("FileCache: failed to remove %s: %v", path, err)
+		} else {
+			fc.logger.Printf("FileCache: removed %s", path)
+		}
+	}
 }
 
 // SaveBase64Content saves base64-encoded data directly to a temp file without decoding.

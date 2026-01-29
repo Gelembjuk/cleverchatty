@@ -502,6 +502,10 @@ func (host *ToolsHost) HasRagServer() bool {
 	return host.ragServerName != ""
 }
 func (host *ToolsHost) Close() error {
+	if host.fileCache != nil {
+		host.fileCache.Cleanup()
+	}
+
 	errors := []error{}
 	for _, client := range host.mcpClients {
 		err := client.Close()
