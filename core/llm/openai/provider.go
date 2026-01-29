@@ -97,46 +97,36 @@ func (p *Provider) CreateMessage(
 		}
 
 		// Handle function/tool responses
+		// OpenAI requires one separate "tool" message per tool_call_id
 		if msg.IsToolResponse() {
-			p.logger.Printf("processing tool response for OpenAI provider with tool_call_id: %s, raw_message: %v\n",
-				msg.GetToolResponseID(),
-				msg)
-
-			// Extract content from tool response
-			var contentStr string
-			if content := msg.GetContent(); content != "" {
-				contentStr = content
-			} else {
-				// Try to extract text from history message content blocks
-				if historyMsg, ok := msg.(*history.HistoryMessage); ok {
-					var texts []string
-					for _, block := range historyMsg.Content {
-						if block.Type == "tool_result" {
-							if block.Text != "" {
-								texts = append(texts, block.Text)
-							} else if contentArray, ok := block.Content.([]interface{}); ok {
-								for _, item := range contentArray {
-									if contentMap, ok := item.(map[string]interface{}); ok {
-										if text, ok := contentMap["text"]; ok {
-											texts = append(texts, fmt.Sprint(text))
-										}
-									}
-								}
-							}
-						}
+			if historyMsg, ok := msg.(*history.HistoryMessage); ok {
+				for _, block := range historyMsg.Content {
+					if block.Type != "tool_result" {
+						continue
 					}
-					contentStr = strings.Join(texts, "\n")
+					contentStr := extractToolResultText(block)
+					if contentStr == "" {
+						contentStr = "No content returned from function"
+					}
+					toolParam := MessageParam{
+						Role:       "tool",
+						Content:    &contentStr,
+						ToolCallID: block.ToolUseID,
+					}
+					openaiMessages = append(openaiMessages, toolParam)
 				}
+			} else {
+				// Fallback for non-history messages (single tool result)
+				contentStr := msg.GetContent()
+				if contentStr == "" {
+					contentStr = "No content returned from function"
+				}
+				param.Content = &contentStr
+				param.Role = "tool"
+				param.ToolCallID = msg.GetToolResponseID()
+				openaiMessages = append(openaiMessages, param)
 			}
-
-			if contentStr == "" {
-				contentStr = "No content returned from function"
-			}
-
-			param.Content = &contentStr
-			param.Role = "tool" // Use tool role instead of function
-			param.ToolCallID = msg.GetToolResponseID()
-			// Don't set name field for tool responses
+			continue
 		}
 
 		openaiMessages = append(openaiMessages, param)
@@ -365,4 +355,22 @@ func (t *ToolCallWrapper) GetArguments() map[string]interface{} {
 		return make(map[string]interface{})
 	}
 	return args
+}
+
+func extractToolResultText(block history.ContentBlock) string {
+	if block.Text != "" {
+		return block.Text
+	}
+	if contentArray, ok := block.Content.([]interface{}); ok {
+		var texts []string
+		for _, item := range contentArray {
+			if contentMap, ok := item.(map[string]interface{}); ok {
+				if text, ok := contentMap["text"]; ok {
+					texts = append(texts, fmt.Sprint(text))
+				}
+			}
+		}
+		return strings.Join(texts, "\n")
+	}
+	return ""
 }
