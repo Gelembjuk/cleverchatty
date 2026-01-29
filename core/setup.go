@@ -73,7 +73,7 @@ func (assistant *CleverChatty) Init() error {
 		return fmt.Errorf("error creating provider: %v", err)
 	}
 
-	assistant.toolsHost, err = newToolsHost(assistant.config.ToolsServers, assistant.logger, assistant.context)
+	assistant.toolsHost, err = newToolsHost(assistant.config.ToolsServers, assistant.logger, assistant.context, assistant.config.WorkDir)
 
 	if err != nil {
 		return fmt.Errorf("error creating MCP host: %v", err)

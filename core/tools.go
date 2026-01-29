@@ -52,6 +52,7 @@ type ToolsHost struct {
 	customToolsMux   sync.RWMutex
 	memoryServerName string
 	ragServerName    string
+	fileCache        *FileCache
 }
 
 type ToolCallResult struct {
@@ -145,11 +146,13 @@ func newToolsHost(
 	mcpServersConfig map[string]ServerConfigWrapper,
 	logger *log.Logger,
 	ctx context.Context,
+	workDir string,
 ) (*ToolsHost, error) {
 	host := &ToolsHost{
-		config:  mcpServersConfig,
-		context: ctx,
-		logger:  logger,
+		config:    mcpServersConfig,
+		context:   ctx,
+		logger:    logger,
+		fileCache: NewFileCache(workDir, logger),
 	}
 
 	return host, nil
@@ -622,6 +625,10 @@ func (host *ToolsHost) loadA2ATools() error {
 }
 
 func (host *ToolsHost) callTool(serverName string, toolName string, toolArgs map[string]interface{}, ctx context.Context) ToolCallResult {
+	// Intercept file: prefixed arguments and replace with file content
+	if host.fileCache != nil {
+		host.resolveFileArgs(toolArgs)
+	}
 	if host.isMCPServer(serverName) {
 		return host.callMCPTool(serverName, toolName, toolArgs, ctx)
 	}
@@ -642,6 +649,72 @@ func (host *ToolsHost) callTool(serverName string, toolName string, toolArgs map
 	return ToolCallResult{
 		Error: fmt.Errorf("server %s is not a valid MCP, A2A, reverse MCP, or custom tool server", serverName),
 	}
+}
+
+// resolveFileArgs walks through tool arguments and replaces any string value
+// containing "file:tmp/" with the base64-encoded content of the referenced file.
+// The file reference can be the entire value or embedded within a larger string.
+func (host *ToolsHost) resolveFileArgs(args map[string]interface{}) {
+	for key, val := range args {
+		switch v := val.(type) {
+		case string:
+			if resolved, ok := host.resolveFileRef(v); ok {
+				args[key] = resolved
+			}
+		case map[string]interface{}:
+			host.resolveFileArgs(v)
+		case []interface{}:
+			for i, item := range v {
+				if s, ok := item.(string); ok {
+					if resolved, ok := host.resolveFileRef(s); ok {
+						v[i] = resolved
+					}
+				}
+			}
+		}
+	}
+}
+
+// resolveFileRef checks if a string contains a file:tmp/ reference and replaces it
+// with the cached file content. Returns the resolved string and true if a
+// replacement was made.
+func (host *ToolsHost) resolveFileRef(val string) (string, bool) {
+	const prefix = "file:tmp/"
+	idx := strings.Index(val, prefix)
+	if idx < 0 {
+		return val, false
+	}
+
+	// Extract the filename starting from "tmp/"
+	rest := val[idx+len("file:"):]
+	// Find the end of the filename (space, quote, or end of string)
+	endIdx := len(rest)
+	for i, ch := range rest {
+		if ch == ' ' || ch == '"' || ch == '\'' || ch == '\n' || ch == ',' {
+			endIdx = i
+			break
+		}
+	}
+	filename := rest[:endIdx]
+
+	host.logger.Printf("resolveFileRef: found reference file:%s in arg (arg length: %d)", filename, len(val))
+
+	content, err := host.fileCache.ReadFile(filename)
+	if err != nil {
+		host.logger.Printf("Failed to read file ref %s: %v", filename, err)
+		return val, false
+	}
+
+	host.logger.Printf("Resolved file ref %s (%d bytes)", filename, len(content))
+
+	// If the entire value is just the file reference, replace completely
+	if idx == 0 && endIdx == len(rest) {
+		return content, true
+	}
+
+	// Otherwise, replace the file:tmp/... portion within the string
+	fileRef := val[idx : idx+len("file:")+endIdx]
+	return strings.Replace(val, fileRef, content, 1), true
 }
 
 // callReverseMCPTool calls a tool on a reverse MCP connected server
@@ -710,8 +783,15 @@ func (host *ToolsHost) callMCPTool(serverName string, toolName string, toolArgs 
 							Text: content.Text,
 						})
 					case mcp.ImageContent:
-						// Convert mcp.ImageContent to history.ImageContent
-						// TODO: handle image content
+						if host.fileCache != nil {
+							result.Content = append(result.Content, host.fileCache.HandleImageContent(content))
+						}
+					case mcp.EmbeddedResource:
+						if host.fileCache != nil {
+							if c := host.fileCache.HandleEmbeddedResource(content); c != nil {
+								result.Content = append(result.Content, c)
+							}
+						}
 					default:
 					}
 				}

@@ -178,6 +178,7 @@ type TLSConfig struct {
 
 type CleverChattyConfig struct {
 	AgentID                  string                         `json:"agent_id"`
+	WorkDir                  string                         `json:"-"`
 	ServerConfig             ServerConfig                   `json:"server"`
 	LogFilePath              string                         `json:"log_file_path"`
 	DebugMode                bool                           `json:"debug_mode"`
@@ -378,6 +379,8 @@ func InitLogger(logFilePath string, debugMMode bool) (*log.Logger, error) {
 
 	if logFilePath == "stdout" {
 		logger = log.New(os.Stdout, "", log.LstdFlags)
+	} else if logFilePath == "stderr" {
+		logger = log.New(os.Stderr, "", log.LstdFlags)
 	} else if logFilePath != "" {
 		f1, err := os.OpenFile(logFilePath, os.O_RDWR|os.O_CREATE|os.O_APPEND, 0666)
 

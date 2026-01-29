@@ -31,6 +31,7 @@ var (
 	agentid          string // A2A user ID
 	configFile       string
 	modelFlag        string // New flag for model selection
+	promptFlag       string // Single prompt mode
 	openaiBaseURL    string // Base URL for OpenAI API
 	anthropicBaseURL string // Base URL for Anthropic API
 	openaiAPIKey     string
@@ -156,6 +157,9 @@ func init() {
 	rootCmd.PersistentFlags().
 		StringVarP(&modelFlag, "model", "m", "",
 			"model to use (format: provider:model, e.g. anthropic:claude-3-5-sonnet-latest or ollama:qwen2.5:3b). If not provided then "+defaultModelFlag+" will be used")
+	rootCmd.PersistentFlags().
+		StringVarP(&promptFlag, "prompt", "p", "",
+			"execute a single prompt and exit without starting the interactive UI")
 
 	rootCmd.PersistentFlags().
 		BoolP("version", "v", false, "show version and exit")
@@ -346,8 +350,120 @@ func runAsStandalone(ctx context.Context) error {
 		return fmt.Errorf("error loading config: %v", err)
 	}
 
+	if promptFlag != "" {
+		return runSinglePromptStandalone(ctx, config)
+	}
+
 	// Always use TUI in standalone mode
 	return runWithTUI(ctx, config)
+}
+
+// composeSinglePromptCallbacks creates callbacks that print status updates to stderr.
+func composeSinglePromptCallbacks() cleverchatty.UICallbacks {
+	callbacks := cleverchatty.UICallbacks{}
+
+	callbacks.SetStartedThinking(func() error {
+		fmt.Fprintln(os.Stderr, "Thinking...")
+		return nil
+	})
+	callbacks.SetMemoryRetrievalStarted(func() error {
+		fmt.Fprintln(os.Stderr, "Recalling...")
+		return nil
+	})
+	callbacks.SetRAGRetrievalStarted(func() error {
+		fmt.Fprintln(os.Stderr, "Searching knowledge database...")
+		return nil
+	})
+	callbacks.SetToolCalling(func(toolName string) error {
+		fmt.Fprintf(os.Stderr, "Using tool: %s\n", toolName)
+		return nil
+	})
+	callbacks.SetToolCallFailed(func(toolName string, err error) error {
+		fmt.Fprintf(os.Stderr, "Tool call failed: %s: %v\n", toolName, err)
+		return nil
+	})
+
+	return callbacks
+}
+
+// runSinglePromptStandalone initializes CleverChatty locally, sends a single prompt, prints the response and exits.
+func runSinglePromptStandalone(ctx context.Context, config *cleverchatty.CleverChattyConfig) error {
+	// If log destination is stdout, redirect to stderr so it doesn't mix with the response
+	if config.LogFilePath == "" || config.LogFilePath == "stdout" {
+		config.LogFilePath = "stderr"
+	}
+
+	logger, err := cleverchatty.InitLogger(config.LogFilePath, config.DebugMode)
+	if err != nil {
+		return fmt.Errorf("error initializing logger: %v", err)
+	}
+
+	cc, err := cleverchatty.GetCleverChattyWithLogger(*config, ctx, logger)
+	if err != nil {
+		return fmt.Errorf("error creating CleverChatty: %v", err)
+	}
+
+	if err := cc.Init(); err != nil {
+		return fmt.Errorf("error initializing CleverChatty: %v", err)
+	}
+	defer cc.Finish()
+
+	cc.Callbacks = composeSinglePromptCallbacks()
+
+	response, err := cc.Prompt(promptFlag)
+	if err != nil {
+		return fmt.Errorf("error processing prompt: %v", err)
+	}
+
+	fmt.Println(response)
+	return nil
+}
+
+// runSinglePromptClient sends a single prompt to the A2A server, prints the response and exits.
+func runSinglePromptClient(ctx context.Context, a2aClient *a2aclient.A2AClient, contextID string, agentID string) error {
+	message := a2aprotocol.Message{
+		Role: a2aprotocol.MessageRoleUser,
+		Parts: []a2aprotocol.Part{
+			a2aprotocol.NewTextPart(promptFlag),
+		},
+		ContextID: &contextID,
+		Metadata: map[string]any{
+			"agent_id": agentID,
+		},
+	}
+
+	taskParams := a2aprotocol.SendMessageParams{
+		Message: message,
+	}
+
+	streamChan, err := a2aClient.StreamMessage(ctx, taskParams)
+	if err != nil {
+		return fmt.Errorf("error starting task stream: %v", err)
+	}
+
+	response, err := processA2AStreamEvents(ctx, streamChan, composeSinglePromptCallbacks())
+	if err != nil {
+		return fmt.Errorf("error processing response: %v", err)
+	}
+
+	fmt.Println(response)
+
+	// Send /bye to release server resources
+	byeMessage := a2aprotocol.Message{
+		Role: a2aprotocol.MessageRoleUser,
+		Parts: []a2aprotocol.Part{
+			a2aprotocol.NewTextPart("/bye"),
+		},
+		ContextID: &contextID,
+		Metadata: map[string]any{
+			"agent_id": agentID,
+		},
+	}
+	byeCtx, byeCancel := context.WithTimeout(context.Background(), 5*time.Second)
+	a2aClient.SendMessage(byeCtx, a2aprotocol.SendMessageParams{Message: byeMessage})
+	byeCancel()
+
+	return nil
 }
 
 func runWithTUI(ctx context.Context, config *cleverchatty.CleverChattyConfig) error {
@@ -836,6 +952,10 @@ func runAsClient(ctx context.Context) error {
 
 	if !check {
 		return fmt.Errorf("the server at %s does not support CleverChatty AI chat", server)
+	}
+
+	if promptFlag != "" {
+		return runSinglePromptClient(ctx, a2aClient, contextID, agentid)
 	}
 
 	if err := updateRenderer(); err != nil {
