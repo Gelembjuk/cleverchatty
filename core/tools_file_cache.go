@@ -2,6 +2,7 @@ package core
 
 import (
 	"crypto/rand"
+	"encoding/base64"
 	"encoding/hex"
 	"fmt"
 	"log"
@@ -15,21 +16,8 @@ import (
 )
 
 const (
-	// fileCacheSavedImageMsg is the message template for a cached image.
-	// Args: cache path, mimeType, cache path
-	fileCacheSavedImageMsg = "Binary data was cached to local path %s (MimeType: %s). " +
-		"The actual data is large and NOT included in this message. " +
-		"IMPORTANT: Do NOT try to generate or guess the data content. " +
-		"To pass this data to another tool, you MUST use exactly file:%s as the argument value. " +
-		"The system will automatically replace this reference with the real data before calling the tool."
-
-	// fileCacheSavedResourceMsg is the message template for a cached resource.
-	// Args: cache path, URI, mimeType, cache path
-	fileCacheSavedResourceMsg = "Binary data was cached to local path %s (Original URI: %s, MimeType: %s). " +
-		"The actual data is large and NOT included in this message. " +
-		"IMPORTANT: Do NOT try to generate or guess the data content. " +
-		"To pass this data to another tool, you MUST use exactly file:%s as the argument value. " +
-		"The system will automatically replace this reference with the real data before calling the tool."
+	// fileCacheObjectPrefix is the prefix used to identify file object references.
+	fileCacheObjectPrefix = "[FILE OBJECT "
 
 	// fileCacheFailedImageMsg is the message template when caching an image fails.
 	// Args: mimeType, error
@@ -38,7 +26,17 @@ const (
 	// fileCacheFailedResourceMsg is the message template when caching a resource fails.
 	// Args: URI, error
 	fileCacheFailedResourceMsg = "Resource %s received but failed to cache locally: %v"
+
+	// maxFileRefLength is the maximum length of a base64-encoded file reference.
+	// The plain text is ~60-80 chars, base64 adds ~33% overhead.
+	maxFileRefLength = 150
 )
+
+// encodeFileRef creates a base64-encoded file object reference string.
+func encodeFileRef(filename, mimeType string) string {
+	plain := fmt.Sprintf("%s%s, mimetype: %s]", fileCacheObjectPrefix, filename, mimeType)
+	return base64.StdEncoding.EncodeToString([]byte(plain))
+}
 
 type FileCache struct {
 	workDir      string
@@ -71,20 +69,18 @@ func (fc *FileCache) SaveContent(data []byte, mimeType string) (string, error) {
 		return "", fmt.Errorf("failed to create tmp dir: %w", err)
 	}
 
-	ext := extensionForMIME(mimeType)
-	name := randomName() + ext
+	name := randomName() + ".tmp"
 	path := filepath.Join(fc.tmpDir(), name)
 
 	if err := os.WriteFile(path, data, 0644); err != nil {
 		return "", fmt.Errorf("failed to write temp file: %w", err)
 	}
 
-	relPath := filepath.Join("tmp", name)
 	fc.mu.Lock()
 	fc.trackedFiles = append(fc.trackedFiles, path)
 	fc.mu.Unlock()
-	fc.logger.Printf("FileCache: saved %d bytes to %s (mime: %s)", len(data), relPath, mimeType)
-	return relPath, nil
+	fc.logger.Printf("FileCache: saved %d bytes to %s (mime: %s)", len(data), name, mimeType)
+	return name, nil
 }
 
 // Cleanup removes all temp files created during this session.
@@ -111,7 +107,7 @@ func (fc *FileCache) SaveBase64Content(b64Data string, mimeType string) (string,
 
 // ReadFile reads a file from the cache directory and returns its content as a string.
 func (fc *FileCache) ReadFile(filename string) (string, error) {
-	path := filepath.Join(fc.workDir, filename)
+	path := filepath.Join(fc.tmpDir(), filename)
 	data, err := os.ReadFile(path)
 	if err != nil {
 		return "", fmt.Errorf("failed to read file %s: %w", filename, err)
@@ -131,7 +127,7 @@ func (fc *FileCache) HandleImageContent(content mcp.ImageContent) history.Conten
 	}
 	return history.TextContent{
 		Type: "text",
-		Text: fmt.Sprintf(fileCacheSavedImageMsg, filename, content.MIMEType, filename),
+		Text: encodeFileRef(filename, content.MIMEType),
 	}
 }
 
@@ -149,7 +145,7 @@ func (fc *FileCache) HandleEmbeddedResource(content mcp.EmbeddedResource) histor
 		}
 		return history.TextContent{
 			Type: "text",
-			Text: fmt.Sprintf(fileCacheSavedResourceMsg, filename, res.URI, res.MIMEType, filename),
+			Text: encodeFileRef(filename, res.MIMEType),
 		}
 	case mcp.TextResourceContents:
 		mimeType := res.MIMEType
@@ -166,40 +162,100 @@ func (fc *FileCache) HandleEmbeddedResource(content mcp.EmbeddedResource) histor
 		}
 		return history.TextContent{
 			Type: "text",
-			Text: fmt.Sprintf(fileCacheSavedResourceMsg, filename, res.URI, mimeType, filename),
+			Text: encodeFileRef(filename, mimeType),
 		}
 	default:
 		return nil
 	}
 }
 
+// ResolveFileArgs walks through tool arguments and replaces any string value
+// containing a [FILE OBJECT ...] reference with the cached file content.
+func (fc *FileCache) ResolveFileArgs(args map[string]interface{}) {
+	for key, val := range args {
+		switch v := val.(type) {
+		case string:
+			if resolved, ok := fc.resolveFileRef(v); ok {
+				args[key] = resolved
+			}
+		case map[string]interface{}:
+			fc.ResolveFileArgs(v)
+		case []interface{}:
+			for i, item := range v {
+				if s, ok := item.(string); ok {
+					if resolved, ok := fc.resolveFileRef(s); ok {
+						v[i] = resolved
+					}
+				}
+			}
+		}
+	}
+}
+
+// resolveFileRef checks if a string is a base64-encoded [FILE OBJECT ...] reference
+// and replaces it with the cached file content. The value must be short enough
+// to plausibly be an encoded reference. Returns the resolved string and true if
+// a replacement was made.
+func (fc *FileCache) resolveFileRef(val string) (string, bool) {
+	if len(val) > maxFileRefLength {
+		return val, false
+	}
+
+	// Quick pre-check: base64 strings only contain these characters
+	if !isBase64(val) {
+		return val, false
+	}
+
+	decoded, err := base64.StdEncoding.DecodeString(val)
+	if err != nil {
+		return val, false
+	}
+
+	plain := string(decoded)
+	if !strings.HasPrefix(plain, fileCacheObjectPrefix) || !strings.HasSuffix(plain, "]") {
+		return val, false
+	}
+
+	// Extract filename from "[FILE OBJECT filename, mimetype: ...]"
+	inner := plain[len(fileCacheObjectPrefix) : len(plain)-1]
+	commaIdx := strings.Index(inner, ",")
+	if commaIdx < 0 {
+		return val, false
+	}
+	filename := strings.TrimSpace(inner[:commaIdx])
+
+	fc.logger.Printf("resolveFileRef: found FILE OBJECT reference %s in arg (arg length: %d)", filename, len(val))
+
+	content, err := fc.ReadFile(filename)
+	if err != nil {
+		fc.logger.Printf("Failed to read file ref %s: %v", filename, err)
+		return val, false
+	}
+
+	fc.logger.Printf("Resolved file ref %s (%d bytes)", filename, len(content))
+	return content, true
+}
+
+// isBase64 checks if a string looks like valid base64 (only valid characters and proper padding).
+func isBase64(s string) bool {
+	if len(s) == 0 || len(s)%4 != 0 {
+		return false
+	}
+	for i := 0; i < len(s); i++ {
+		c := s[i]
+		if (c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') || (c >= '0' && c <= '9') || c == '+' || c == '/' {
+			continue
+		}
+		if c == '=' && i >= len(s)-2 {
+			continue
+		}
+		return false
+	}
+	return true
+}
+
 func randomName() string {
 	b := make([]byte, 8)
 	rand.Read(b)
 	return hex.EncodeToString(b)
-}
-
-func extensionForMIME(mimeType string) string {
-	switch {
-	case strings.HasPrefix(mimeType, "image/png"):
-		return ".png"
-	case strings.HasPrefix(mimeType, "image/jpeg"):
-		return ".jpg"
-	case strings.HasPrefix(mimeType, "image/gif"):
-		return ".gif"
-	case strings.HasPrefix(mimeType, "image/webp"):
-		return ".webp"
-	case strings.HasPrefix(mimeType, "image/svg"):
-		return ".svg"
-	case strings.HasPrefix(mimeType, "application/pdf"):
-		return ".pdf"
-	case strings.HasPrefix(mimeType, "text/plain"):
-		return ".txt"
-	case strings.HasPrefix(mimeType, "text/html"):
-		return ".html"
-	case strings.HasPrefix(mimeType, "application/json"):
-		return ".json"
-	default:
-		return ".bin"
-	}
 }
