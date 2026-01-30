@@ -10,7 +10,7 @@ require (
 	github.com/charmbracelet/huh v0.7.0
 	github.com/charmbracelet/huh/spinner v0.0.0-20250414191420-151ba059f6ea
 	github.com/charmbracelet/lipgloss v1.1.1-0.20250404203927-76690c660834
-	github.com/gelembjuk/cleverchatty/core v0.4.1
+	github.com/gelembjuk/cleverchatty/core v0.4.2
 	github.com/google/uuid v1.6.0
 	github.com/mark3labs/mcphost v0.6.0
 	github.com/muesli/reflow v0.3.0
