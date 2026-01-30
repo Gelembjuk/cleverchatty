@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"log"
 	"net/http"
 	"os"
@@ -173,7 +174,7 @@ func init() {
 	}
 	// Add debug flag
 	rootCmd.PersistentFlags().
-		BoolVar(&debugMode, "debug", false, "enable debug logging")
+		BoolVarP(&debugMode, "debug", "d", false, "enable debug logging")
 
 	flags := rootCmd.PersistentFlags()
 	flags.StringVar(&openaiBaseURL, "openai-url", "", "base URL for OpenAI API (defaults to api.openai.com)")
@@ -427,6 +428,13 @@ func runSinglePromptStandalone(ctx context.Context, config *cleverchatty.CleverC
 
 // runSinglePromptClient sends a single prompt to the A2A server, prints the response and exits.
 func runSinglePromptClient(ctx context.Context, a2aClient *a2aclient.A2AClient, contextID string, agentID string) error {
+	if debugMode {
+		// In debug mode, send logs to stderr so they don't mix with the response on stdout
+		log.SetOutput(os.Stderr)
+	} else {
+		// Suppress all logs unless debug mode is enabled
+		log.SetOutput(io.Discard)
+	}
 	message := a2aprotocol.Message{
 		Role: a2aprotocol.MessageRoleUser,
 		Parts: []a2aprotocol.Part{
@@ -807,25 +815,47 @@ func runAsClientWithTUI(ctx context.Context, a2aClient *a2aclient.A2AClient, con
 	tuiAgentID = agentID
 	useTUIMode = true
 
-	// Redirect all logs to TUI
-	log.SetOutput(&tuiLogWriter{})
-	log.SetFlags(log.LstdFlags)
-
-	// Also redirect stderr to capture library logs (like A2A client errors)
+	// Save stderr so we can restore it later
 	oldStderr := os.Stderr
-	r, w, err := os.Pipe()
-	if err == nil {
-		os.Stderr = w
-		// Start a goroutine to read from the pipe and send to TUI
-		go func() {
-			scanner := bufio.NewScanner(r)
-			for scanner.Scan() {
-				line := scanner.Text()
-				if program != nil {
-					program.Send(logMsg(line + "\n"))
+	var pipeWriter *os.File
+
+	if debugMode {
+		// Redirect all logs to TUI
+		log.SetOutput(&tuiLogWriter{})
+		log.SetFlags(log.LstdFlags)
+
+		// Also redirect stderr to capture library logs (like A2A client errors)
+		r, w, err := os.Pipe()
+		if err == nil {
+			pipeWriter = w
+			os.Stderr = w
+			// Start a goroutine to read from the pipe and send to TUI
+			go func() {
+				scanner := bufio.NewScanner(r)
+				for scanner.Scan() {
+					line := scanner.Text()
+					if program != nil {
+						program.Send(logMsg(line + "\n"))
+					}
 				}
-			}
-		}()
+			}()
+		}
+	} else {
+		// Suppress all logs in client mode unless debug is enabled
+		log.SetOutput(io.Discard)
+
+		// Redirect stderr to discard library logs
+		r, w, err := os.Pipe()
+		if err == nil {
+			pipeWriter = w
+			os.Stderr = w
+			go func() {
+				scanner := bufio.NewScanner(r)
+				for scanner.Scan() {
+					// discard
+				}
+			}()
+		}
 	}
 
 	// Immediately establish persistent notification subscription
@@ -914,10 +944,10 @@ func runAsClientWithTUI(ctx context.Context, a2aClient *a2aclient.A2AClient, con
 	tuiA2AClient = nil
 
 	// Restore stderr if we redirected it
-	if oldStderr != nil {
-		w.Close() // Close the pipe writer
-		os.Stderr = oldStderr
+	if pipeWriter != nil {
+		pipeWriter.Close()
 	}
+	os.Stderr = oldStderr
 
 	// Restore default logger to stderr
 	log.SetOutput(os.Stderr)
