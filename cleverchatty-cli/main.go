@@ -78,6 +78,22 @@ func initCleverChattyFunc() tea.Msg {
 		return initCompleteMsg{cleverChatty: nil, err: nil}
 	}
 
+	// If already initialized (pre-init done before TUI started), just set up callbacks
+	if tuiCleverChatty != nil {
+		// Redirect logger to TUI now that it's running
+		customLogger := log.New(&tuiLogWriter{}, "", log.LstdFlags)
+		if tuiConfig.DebugMode {
+			customLogger.SetFlags(log.LstdFlags | log.Lshortfile)
+		}
+		tuiCleverChatty.WithLogger(customLogger)
+
+		tuiCleverChatty.Callbacks = composeCallbacks(true)
+		tuiCleverChatty.SetNotificationCallback(func(notification cleverchatty.Notification) {
+			tuiSendNotification(notification)
+		})
+		return initCompleteMsg{cleverChatty: tuiCleverChatty, err: nil}
+	}
+
 	// Standalone mode - initialize local CleverChatty
 	// Create a custom logger that writes to the TUI
 	customLogger := log.New(&tuiLogWriter{}, "", log.LstdFlags)
@@ -133,6 +149,7 @@ Example:
   cleverchatty-cli --config config.json
   cleverchatty-cli --model anthropic:claude-3-5-sonnet-latest
   cleverchatty-cli -m ollama:qwen2.5:3b`,
+	SilenceUsage: true,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		return run(context.Background())
 	},
@@ -489,6 +506,20 @@ func runWithTUI(ctx context.Context, config *cleverchatty.CleverChattyConfig) er
 	tuiContext = ctx
 	tuiConfig = config
 	useTUIMode = true
+
+	// Pre-init assistant before starting TUI to catch errors early
+	logger, err := cleverchatty.InitLogger(config.LogFilePath, config.DebugMode)
+	if err != nil {
+		return fmt.Errorf("error initializing logger: %v", err)
+	}
+	cleverChattyObject, err := cleverchatty.GetCleverChattyWithLogger(*config, ctx, logger)
+	if err != nil {
+		return fmt.Errorf("assistant init failed: %v", err)
+	}
+	if err = cleverChattyObject.Init(); err != nil {
+		return fmt.Errorf("assistant init failed: %v", err)
+	}
+	tuiCleverChatty = cleverChattyObject
 
 	// Redirect all logs to TUI (if not already configured to log to file)
 	var oldStderr *os.File
