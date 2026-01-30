@@ -9,14 +9,15 @@ import (
 )
 
 const (
-	messageRoleUser            = "user"
-	messageRoleAssistant       = "assistant"
-	messageRoleSystem          = "system"
-	messageSubroleMemory       = "memory"
-	messageSubroleRAGContext   = "rag_context"
-	messageSubrolePrompt       = "prompt"
-	messageSubroleInstruction  = "instruction"
-	messageSubroleToolResponse = "tool_response"
+	messageRoleUser                  = "user"
+	messageRoleAssistant             = "assistant"
+	messageRoleSystem                = "system"
+	messageSubroleMemory             = "memory"
+	messageSubroleRAGContext         = "rag_context"
+	messageSubrolePrompt             = "prompt"
+	messageSubroleInstruction        = "instruction"
+	messageSubroleToolResponse       = "tool_response"
+	messageSubroleAgentNotification  = "agent_notification"
 )
 
 // HistoryMessage implements the llm.Message interface for stored messages
@@ -95,6 +96,20 @@ func NewSystemInstructionMessage(instruction string) HistoryMessage {
 			{
 				Type: "text",
 				Text: instruction,
+			},
+		},
+	}
+}
+
+// NewAgentNotificationMessage creates an assistant message from the notification processor
+func NewAgentNotificationMessage(content string) HistoryMessage {
+	return HistoryMessage{
+		Role:    messageRoleAssistant,
+		SubRole: messageSubroleAgentNotification,
+		Content: []ContentBlock{
+			{
+				Type: "text",
+				Text: content,
 			},
 		},
 	}

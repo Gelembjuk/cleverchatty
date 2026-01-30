@@ -21,16 +21,19 @@ var (
 	tokyoBlue   = lipgloss.Color("111") // #7aa2f7
 	tokyoGreen  = lipgloss.Color("120") // #73daca
 	tokyoRed    = lipgloss.Color("203") // #f7768e
-	//tokyoOrange = lipgloss.Color("215") // #ff9e64
-	tokyoFg = lipgloss.Color("189") // #c0caf5
-	//tokyoGray   = lipgloss.Color("237") // #3b4261
-	tokyoBg = lipgloss.Color("234") // #1a1b26
+	tokyoOrange = lipgloss.Color("215") // #ff9e64
+	tokyoYellow = lipgloss.Color("221") // #e0af68
+	tokyoFg     = lipgloss.Color("189") // #c0caf5
+	tokyoGray   = lipgloss.Color("237") // #3b4261
+	tokyoBg     = lipgloss.Color("234") // #1a1b26
 
 	promptStyle = lipgloss.NewStyle().
-			Foreground(tokyoBlue)
+			Foreground(tokyoBlue).
+			Bold(true)
 
 	responseStyle = lipgloss.NewStyle().
-			Foreground(tokyoFg)
+			Foreground(tokyoGreen).
+			Bold(true)
 
 	errorStyle = lipgloss.NewStyle().
 			Foreground(tokyoRed).
@@ -41,6 +44,9 @@ var (
 			Foreground(tokyoCyan).
 			PaddingLeft(2).
 			Bold(true)
+
+	separatorStyle = lipgloss.NewStyle().
+			Foreground(tokyoGray)
 
 	//descriptionStyle = lipgloss.NewStyle().
 	//			Foreground(tokyoFg).

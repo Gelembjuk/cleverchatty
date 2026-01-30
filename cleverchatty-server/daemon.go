@@ -222,6 +222,19 @@ func runServer() error {
 			return fmt.Errorf("failed to start A2A server: %v", err)
 		}
 		logger.Println("A2A server started successfully.")
+
+		// Set notification callback to broadcast notifications to A2A clients
+		sessions_manager.SetNotificationCallback(func(notification cleverchatty.Notification) {
+			// Broadcast the notification to all A2A notification subscribers
+			a2aServer.BroadcastNotification(notification)
+		})
+		logger.Println("MCP notification broadcasting to A2A clients enabled.")
+
+		// Set agent message callback to broadcast agent messages to A2A clients
+		sessions_manager.SetAgentMessageCallback(func(message string) {
+			a2aServer.BroadcastAgentMessage(message)
+		})
+		logger.Println("Agent message broadcasting to A2A clients enabled.")
 	}
 
 	// Initialize Reverse MCP connector if enabled

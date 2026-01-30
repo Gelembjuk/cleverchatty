@@ -37,13 +37,16 @@ func handleSlashCommand(prompt string, cleverChattyObject cleverchatty.CleverCha
 	case "/servers":
 		handleServersCommand(cleverChattyObject)
 		return true, nil
-	case "/quit":
-		fmt.Println("\nGoodbye!")
-		defer os.Exit(0)
+	case "/quit", "/bye", "/exit":
+		tuiPrint("\nGoodbye!\n")
+		if useTUIMode {
+			tuiQuit()
+		} else {
+			os.Exit(0)
+		}
 		return true, nil
 	default:
-		fmt.Printf("%s\nType /help to see available commands\n\n",
-			errorStyle.Render("Unknown command: "+prompt))
+		tuiPrint(errorStyle.Render("Unknown command: "+prompt) + "\nType /help to see available commands\n\n")
 		return true, nil
 	}
 }
@@ -66,7 +69,7 @@ func handleSlashCommandAsClient(prompt string, a2aClient a2aclient.A2AClient, ct
 	case "/version":
 		handleVersionCommand()
 		return true, nil
-	case "/quit":
+	case "/quit", "/bye", "/exit":
 		taskParams := a2aprotocol.SendMessageParams{
 			Message: a2aprotocol.Message{
 				Role: a2aprotocol.MessageRoleUser,
@@ -82,8 +85,12 @@ func handleSlashCommandAsClient(prompt string, a2aClient a2aclient.A2AClient, ct
 
 		a2aClient.SendMessage(ctx, taskParams)
 
-		fmt.Println("\nGoodbye!")
-		defer os.Exit(0)
+		tuiPrint("\nGoodbye!\n")
+		if useTUIMode {
+			tuiQuit()
+		} else {
+			os.Exit(0)
+		}
 		return true, nil
 	default:
 		fmt.Printf("%s\nType /help to see available commands\n\n",
@@ -93,9 +100,8 @@ func handleSlashCommandAsClient(prompt string, a2aClient a2aclient.A2AClient, ct
 }
 func handleHelpCommand() {
 	if err := updateRenderer(); err != nil {
-		fmt.Printf(
-			"\n%s\n",
-			errorStyle.Render(fmt.Sprintf("Error updating renderer: %v", err)),
+		tuiPrint(
+			"\n" + errorStyle.Render(fmt.Sprintf("Error updating renderer: %v", err)) + "\n",
 		)
 		return
 	}
@@ -107,27 +113,28 @@ func handleHelpCommand() {
 	markdown.WriteString("- **/tools**: List all available tools\n")
 	markdown.WriteString("- **/servers**: List configured MCP servers\n")
 	markdown.WriteString("- **/history**: Display conversation history\n")
-	markdown.WriteString("- **/quit**: Exit the application\n")
-	markdown.WriteString("\nYou can also press Ctrl+C at any time to quit.\n")
-	markdown.WriteString("CleverChatty CLI version: " + cleverchatty.ThisAppVersion + "\n")
+	markdown.WriteString("- **/quit**, **/bye**, **/exit**: Exit the application\n")
+	markdown.WriteString("\n## Navigation\n\n")
+	markdown.WriteString("- **PgUp/PgDn**: Scroll through chat history\n")
+	markdown.WriteString("- **Ctrl+Home/End**: Jump to top/bottom\n")
+	markdown.WriteString("- **Ctrl+C**: Quit at any time\n")
+	markdown.WriteString("\nCleverChatty CLI version: " + cleverchatty.ThisAppVersion + "\n")
 
 	rendered, err := renderer.Render(markdown.String())
 	if err != nil {
-		fmt.Printf(
-			"\n%s\n",
-			errorStyle.Render(fmt.Sprintf("Error rendering help: %v", err)),
+		tuiPrint(
+			"\n" + errorStyle.Render(fmt.Sprintf("Error rendering help: %v", err)) + "\n",
 		)
 		return
 	}
 
-	fmt.Print(rendered)
+	tuiPrint(rendered)
 }
 
 func handleVersionCommand() {
 	if err := updateRenderer(); err != nil {
-		fmt.Printf(
-			"\n%s\n",
-			errorStyle.Render(fmt.Sprintf("Error updating renderer: %v", err)),
+		tuiPrint(
+			"\n" + errorStyle.Render(fmt.Sprintf("Error updating renderer: %v", err)) + "\n",
 		)
 		return
 	}
@@ -137,21 +144,19 @@ func handleVersionCommand() {
 
 	rendered, err := renderer.Render(markdown.String())
 	if err != nil {
-		fmt.Printf(
-			"\n%s\n",
-			errorStyle.Render(fmt.Sprintf("Error rendering help: %v", err)),
+		tuiPrint(
+			"\n" + errorStyle.Render(fmt.Sprintf("Error rendering help: %v", err)) + "\n",
 		)
 		return
 	}
 
-	fmt.Print(rendered)
+	tuiPrint(rendered)
 }
 
 func handleServersCommand(cleverChattyObject cleverchatty.CleverChatty) {
 	if err := updateRenderer(); err != nil {
-		fmt.Printf(
-			"\n%s\n",
-			errorStyle.Render(fmt.Sprintf("Error updating renderer: %v", err)),
+		tuiPrint(
+			"\n" + errorStyle.Render(fmt.Sprintf("Error updating renderer: %v", err)) + "\n",
 		)
 		return
 	}
@@ -208,16 +213,20 @@ func handleServersCommand(cleverChattyObject cleverchatty.CleverChatty) {
 		}
 	}
 
-	_ = spinner.New().
-		Title("Loading server configuration...").
-		Action(action).
-		Run()
+	// Skip spinner in TUI mode
+	if !useTUIMode {
+		_ = spinner.New().
+			Title("Loading server configuration...").
+			Action(action).
+			Run()
+	} else {
+		action()
+	}
 
 	rendered, err := renderer.Render(markdown.String())
 	if err != nil {
-		fmt.Printf(
-			"\n%s\n",
-			errorStyle.Render(fmt.Sprintf("Error rendering servers: %v", err)),
+		tuiPrint(
+			"\n" + errorStyle.Render(fmt.Sprintf("Error rendering servers: %v", err)) + "\n",
 		)
 		return
 	}
@@ -228,7 +237,7 @@ func handleServersCommand(cleverChattyObject cleverchatty.CleverChatty) {
 		MarginRight(4)
 
 	// Wrap the rendered content in the container
-	fmt.Print("\n" + containerStyle.Render(rendered) + "\n")
+	tuiPrint("\n" + containerStyle.Render(rendered) + "\n")
 }
 
 func handleToolsCommand(cleverChattyObject cleverchatty.CleverChatty) {
@@ -241,7 +250,7 @@ func handleToolsCommand(cleverChattyObject cleverchatty.CleverChatty) {
 	results := cleverChattyObject.GetToolsInfo()
 	// If tools are disabled (empty client map), show a message
 	if len(results) == 0 {
-		fmt.Print(
+		tuiPrint(
 			"\n" + contentStyle.Render(
 				"Tools are currently disabled for this model.\n",
 			) + "\n\n",
@@ -255,15 +264,14 @@ func handleToolsCommand(cleverChattyObject cleverchatty.CleverChatty) {
 
 	for _, server := range results {
 		if server.Err != nil {
-			fmt.Printf(
-				"\n%s\n",
-				errorStyle.Render(
+			tuiPrint(
+				"\n" + errorStyle.Render(
 					fmt.Sprintf(
 						"Error fetching tools from %s: %v",
 						server.Name,
 						server.Err,
 					),
-				),
+				) + "\n",
 			)
 			continue
 		}
@@ -302,13 +310,12 @@ func handleToolsCommand(cleverChattyObject cleverchatty.CleverChatty) {
 		Width(width)
 
 	// Wrap the entire content in the container
-	fmt.Print("\n" + containerStyle.Render(l.String()) + "\n")
+	tuiPrint("\n" + containerStyle.Render(l.String()) + "\n")
 }
 func handleHistoryCommand(cleverChattyObject cleverchatty.CleverChatty) {
 	if err := updateRenderer(); err != nil {
-		fmt.Printf(
-			"\n%s\n",
-			errorStyle.Render(fmt.Sprintf("Error updating renderer: %v", err)),
+		tuiPrint(
+			"\n" + errorStyle.Render(fmt.Sprintf("Error updating renderer: %v", err)) + "\n",
 		)
 		return
 	}
@@ -381,13 +388,12 @@ func handleHistoryCommand(cleverChattyObject cleverchatty.CleverChatty) {
 	// Render the markdown
 	rendered, err := renderer.Render(markdown.String())
 	if err != nil {
-		fmt.Printf(
-			"\n%s\n",
-			errorStyle.Render(fmt.Sprintf("Error rendering history: %v", err)),
+		tuiPrint(
+			"\n" + errorStyle.Render(fmt.Sprintf("Error rendering history: %v", err)) + "\n",
 		)
 		return
 	}
 
 	// Print directly without box
-	fmt.Print("\n" + rendered + "\n")
+	tuiPrint("\n" + rendered + "\n")
 }

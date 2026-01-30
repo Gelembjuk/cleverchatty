@@ -16,6 +16,12 @@ import (
 	"github.com/mark3labs/mcp-go/mcp"
 )
 
+// notificationCallbackWrapper stores the callback with server name context
+type notificationCallbackWrapper struct {
+	serverName string
+	callback   NotificationCallback
+}
+
 const (
 	memoryToolRememberName = "remember"
 	memoryToolRecallName   = "recall"
@@ -42,8 +48,11 @@ type ToolsHost struct {
 	reverseMCPClient ReverseMCPClient
 	tools            []llm.Tool
 	toolsMux         sync.RWMutex
+	customTools      map[string]CustomTool
+	customToolsMux   sync.RWMutex
 	memoryServerName string
 	ragServerName    string
+	fileCache        *FileCache
 }
 
 type ToolCallResult struct {
@@ -137,11 +146,13 @@ func newToolsHost(
 	mcpServersConfig map[string]ServerConfigWrapper,
 	logger *log.Logger,
 	ctx context.Context,
+	workDir string,
 ) (*ToolsHost, error) {
 	host := &ToolsHost{
-		config:  mcpServersConfig,
-		context: ctx,
-		logger:  logger,
+		config:    mcpServersConfig,
+		context:   ctx,
+		logger:    logger,
+		fileCache: NewFileCache(workDir, logger),
 	}
 
 	return host, nil
@@ -176,6 +187,33 @@ func (host *ToolsHost) Init() error {
 	return nil
 }
 
+// SetNotificationCallback sets a callback for notifications from all MCP servers.
+// The callback receives a unified Notification structure instead of the raw MCP notification.
+// If a notification method is configured in notification_instructions for the server,
+// the notification will be marked as monitored.
+func (host *ToolsHost) SetNotificationCallback(callback NotificationCallback) {
+	for serverName, client := range host.mcpClients {
+		// Get the server config to check for notification instructions
+		serverConfig := host.config[serverName]
+
+		// Create a wrapper to capture serverName and config in the closure
+		wrapper := notificationCallbackWrapper{
+			serverName: serverName,
+			callback:   callback,
+		}
+		client.OnNotification(func(mcpNotification mcp.JSONRPCNotification) {
+			// Convert MCP notification to unified Notification
+			notification := NewNotificationFromMCP(wrapper.serverName, mcpNotification)
+
+			// Check if this notification method is monitored
+			if instructions := serverConfig.GetNotificationInstructions(mcpNotification.Method); instructions != nil {
+				notification.SetMonitored()
+			}
+
+			wrapper.callback(notification)
+		})
+	}
+}
 func (host *ToolsHost) isMCPServer(serverName string) bool {
 	_, ok := host.mcpClients[serverName]
 	return ok
@@ -198,7 +236,7 @@ func (host *ToolsHost) SetReverseMCPClient(client ReverseMCPClient) {
 	host.reverseMCPClient = client
 }
 
-// GetAllToolsForLLM returns all tools including dynamically loaded reverse MCP tools
+// GetAllToolsForLLM returns all tools including dynamically loaded reverse MCP tools and custom tools
 func (host *ToolsHost) GetAllToolsForLLM() []llm.Tool {
 	host.toolsMux.RLock()
 	// Start with a copy of static tools
@@ -215,6 +253,10 @@ func (host *ToolsHost) GetAllToolsForLLM() []llm.Tool {
 		}
 	}
 
+	// Add custom tools
+	customTools := host.getCustomToolsForLLM()
+	allTools = append(allTools, customTools...)
+
 	return allTools
 }
 
@@ -227,13 +269,29 @@ func (host *ToolsHost) mcpToolsToAnthropicTools(
 	for i, tool := range mcpTools {
 		namespacedName := fmt.Sprintf("%s__%s", serverName, tool.Name)
 
+		// Ensure schema type is "object" and properties is not nil
+		schemaType := tool.InputSchema.Type
+		if schemaType == "" {
+			schemaType = "object"
+		}
+
+		properties := tool.InputSchema.Properties
+		if properties == nil {
+			properties = map[string]interface{}{}
+		}
+
+		required := tool.InputSchema.Required
+		if required == nil {
+			required = []string{}
+		}
+
 		anthropicTools[i] = llm.Tool{
 			Name:        namespacedName,
 			Description: tool.Description,
 			InputSchema: llm.Schema{
-				Type:       tool.InputSchema.Type,
-				Properties: tool.InputSchema.Properties,
-				Required:   tool.InputSchema.Required,
+				Type:       schemaType,
+				Properties: properties,
+				Required:   required,
 			},
 		}
 	}
@@ -310,6 +368,7 @@ func (host *ToolsHost) createMCPClients() error {
 				}
 				options = append(options, transport.WithHTTPHeaders(headers))
 			}
+			options = append(options, transport.WithContinuousListening())
 
 			client, err = mcpclient.NewStreamableHttpClient(
 				httpConfig.Url,
@@ -443,6 +502,10 @@ func (host *ToolsHost) HasRagServer() bool {
 	return host.ragServerName != ""
 }
 func (host *ToolsHost) Close() error {
+	if host.fileCache != nil {
+		host.fileCache.Cleanup()
+	}
+
 	errors := []error{}
 	for _, client := range host.mcpClients {
 		err := client.Close()
@@ -566,6 +629,10 @@ func (host *ToolsHost) loadA2ATools() error {
 }
 
 func (host *ToolsHost) callTool(serverName string, toolName string, toolArgs map[string]interface{}, ctx context.Context) ToolCallResult {
+	// Resolve any cached file references in tool arguments
+	if host.fileCache != nil {
+		host.fileCache.ResolveFileArgs(toolArgs)
+	}
 	if host.isMCPServer(serverName) {
 		return host.callMCPTool(serverName, toolName, toolArgs, ctx)
 	}
@@ -580,8 +647,11 @@ func (host *ToolsHost) callTool(serverName string, toolName string, toolArgs map
 	if host.isReverseMCPServer(serverName) {
 		return host.callReverseMCPTool(serverName, toolName, toolArgs, ctx)
 	}
+	if host.isCustomTool(serverName) {
+		return host.callCustomTool(toolName, toolArgs, ctx)
+	}
 	return ToolCallResult{
-		Error: fmt.Errorf("server %s is not a valid MCP, A2A, or reverse MCP server", serverName),
+		Error: fmt.Errorf("server %s is not a valid MCP, A2A, reverse MCP, or custom tool server", serverName),
 	}
 }
 
@@ -651,8 +721,15 @@ func (host *ToolsHost) callMCPTool(serverName string, toolName string, toolArgs 
 							Text: content.Text,
 						})
 					case mcp.ImageContent:
-						// Convert mcp.ImageContent to history.ImageContent
-						// TODO: handle image content
+						if host.fileCache != nil {
+							result.Content = append(result.Content, host.fileCache.HandleImageContent(content))
+						}
+					case mcp.EmbeddedResource:
+						if host.fileCache != nil {
+							if c := host.fileCache.HandleEmbeddedResource(content); c != nil {
+								result.Content = append(result.Content, c)
+							}
+						}
 					default:
 					}
 				}

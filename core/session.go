@@ -2,6 +2,7 @@ package core
 
 import (
 	"context"
+	"errors"
 	"log"
 	"sync"
 	"time"
@@ -14,12 +15,14 @@ type Session struct {
 }
 
 type SessionManager struct {
-	sessions         map[string]*Session
-	mutex            sync.RWMutex
-	config           *CleverChattyConfig
-	context          context.Context
-	logger           *log.Logger
-	reverseMCPClient ReverseMCPClient
+	sessions             map[string]*Session
+	mutex                sync.RWMutex
+	config               *CleverChattyConfig
+	context              context.Context
+	logger               *log.Logger
+	reverseMCPClient     ReverseMCPClient
+	notificationCallback NotificationCallback
+	agentMessageCallback AgentMessageCallback
 }
 
 func NewSessionManager(config *CleverChattyConfig, ctx context.Context, logger *log.Logger) *SessionManager {
@@ -36,6 +39,29 @@ func (sm *SessionManager) SetReverseMCPClient(client ReverseMCPClient) {
 	sm.reverseMCPClient = client
 }
 
+// SetNotificationCallback sets the callback for notifications from MCP servers.
+// The callback receives a unified Notification structure instead of the raw MCP notification.
+func (sm *SessionManager) SetNotificationCallback(callback NotificationCallback) {
+	sm.notificationCallback = callback
+}
+
+// SetAgentMessageCallback sets the callback for agent-generated messages
+func (sm *SessionManager) SetAgentMessageCallback(callback AgentMessageCallback) {
+	sm.agentMessageCallback = callback
+}
+
+// GetSession retrieves a session by ID. Returns nil if not found.
+func (sm *SessionManager) GetSession(id string) (*Session, error) {
+	sm.mutex.RLock()
+	defer sm.mutex.RUnlock()
+	session, ok := sm.sessions[id]
+	if !ok {
+		return nil, errors.New("session not found")
+	}
+	return session, nil
+}
+
+// GetOrCreateSession retrieves an existing session or creates a new one if it doesn't exist.
 func (sm *SessionManager) GetOrCreateSession(id string, clientAgentID string) (*Session, error) {
 	sm.mutex.RLock()
 	sm.logger.Printf("GetOrCreateSession called for ID: %s. There are %d active sessions", id, len(sm.sessions))
@@ -61,6 +87,16 @@ func (sm *SessionManager) GetOrCreateSession(id string, clientAgentID string) (*
 	// Set reverse MCP client if available
 	if sm.reverseMCPClient != nil {
 		ai.SetReverseMCPClient(sm.reverseMCPClient)
+	}
+
+	// Set agent message callback if available
+	if sm.agentMessageCallback != nil {
+		ai.SetAgentMessageCallback(sm.agentMessageCallback)
+	}
+
+	// Set notification callback if available
+	if sm.notificationCallback != nil {
+		ai.SetNotificationCallback(sm.notificationCallback)
 	}
 
 	// Create new session
@@ -103,7 +139,7 @@ func (sm *SessionManager) StartCleanupLoop() {
 func (sm *SessionManager) FinishSession(id string) {
 	sm.mutex.Lock()
 	defer sm.mutex.Unlock()
-
+	
 	if session, ok := sm.sessions[id]; ok {
 		session.AI.Finish()
 		delete(sm.sessions, id)
