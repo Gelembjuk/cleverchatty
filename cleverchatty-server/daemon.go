@@ -37,36 +37,40 @@ var rootCmd = &cobra.Command{
 }
 
 var runCmd = &cobra.Command{
-	Use:   "run",
-	Short: "Run the server",
-	Long:  `Run the cleverchatty server. This command starts the server and listens for incoming requests.`,
+	Use:          "run",
+	Short:        "Run the server",
+	Long:         `Run the cleverchatty server. This command starts the server and listens for incoming requests.`,
+	SilenceUsage: true,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		return runServer()
 	},
 }
 
 var startCmd = &cobra.Command{
-	Use:   "start",
-	Short: "Start the server as a daemon",
-	Long:  `Start the cleverchatty server as a background daemon process. This command forks the server process and runs it in the background.`,
+	Use:          "start",
+	Short:        "Start the server as a daemon",
+	Long:         `Start the cleverchatty server as a background daemon process. This command forks the server process and runs it in the background.`,
+	SilenceUsage: true,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		return startDaemon()
 	},
 }
 
 var stopCmd = &cobra.Command{
-	Use:   "stop",
-	Short: "Stop the server daemon",
-	Long:  `Stop the cleverchatty server daemon. This command sends a termination signal to the running server process.`,
+	Use:          "stop",
+	Short:        "Stop the server daemon",
+	Long:         `Stop the cleverchatty server daemon. This command sends a termination signal to the running server process.`,
+	SilenceUsage: true,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		return stopDaemon()
 	},
 }
 
 var reloadCmd = &cobra.Command{
-	Use:   "reload",
-	Short: "Reload the server configuration",
-	Long:  `Reload the configuration of the cleverchatty server daemon. This command sends a SIGHUP signal to the running server process to reload its configuration without stopping it.`,
+	Use:          "reload",
+	Short:        "Reload the server configuration",
+	Long:         `Reload the configuration of the cleverchatty server daemon. This command sends a SIGHUP signal to the running server process to reload its configuration without stopping it.`,
+	SilenceUsage: true,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		reloadDaemon()
 		return nil
@@ -199,6 +203,21 @@ func runServer() error {
 	logger.Println("Daemon running...")
 
 	commonContext, commonContextCancel := context.WithCancel(context.Background())
+
+	// Test-init the assistant to verify configuration is valid before starting the server
+	logger.Println("Verifying assistant initialization...")
+	testAI, err := cleverchatty.GetCleverChattyWithLogger(*config, commonContext, logger)
+	if err != nil {
+		commonContextCancel()
+		return fmt.Errorf("assistant init check failed: %v", err)
+	}
+	err = testAI.Init()
+	if err != nil {
+		commonContextCancel()
+		return fmt.Errorf("assistant init check failed: %v", err)
+	}
+	testAI.Finish()
+	logger.Println("Assistant initialization verified successfully.")
 
 	sessions_manager := cleverchatty.NewSessionManager(config, commonContext, logger)
 	sessions_manager.StartCleanupLoop()
