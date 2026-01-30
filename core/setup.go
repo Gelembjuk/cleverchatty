@@ -94,6 +94,9 @@ func (assistant *CleverChatty) Init() error {
 
 func (assistant *CleverChatty) WithLogger(logger *log.Logger) {
 	assistant.logger = logger
+	if assistant.toolsHost != nil {
+		assistant.toolsHost.logger = logger
+	}
 }
 
 func (assistant *CleverChatty) WithCallbacks(callbacks UICallbacks) {

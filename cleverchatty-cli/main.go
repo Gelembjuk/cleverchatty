@@ -508,11 +508,9 @@ func runWithTUI(ctx context.Context, config *cleverchatty.CleverChattyConfig) er
 	useTUIMode = true
 
 	// Pre-init assistant before starting TUI to catch errors early
-	logger, err := cleverchatty.InitLogger(config.LogFilePath, config.DebugMode)
-	if err != nil {
-		return fmt.Errorf("error initializing logger: %v", err)
-	}
-	cleverChattyObject, err := cleverchatty.GetCleverChattyWithLogger(*config, ctx, logger)
+	// Use a discard logger during pre-init; TUI will set the proper logger after start
+	discardLogger := log.New(io.Discard, "", 0)
+	cleverChattyObject, err := cleverchatty.GetCleverChattyWithLogger(*config, ctx, discardLogger)
 	if err != nil {
 		return fmt.Errorf("assistant init failed: %v", err)
 	}
