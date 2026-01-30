@@ -3,7 +3,7 @@ module github.com/gelembjuk/cleverchatty/cleverchatty-server
 go 1.24.1
 
 require (
-	github.com/gelembjuk/cleverchatty/core v0.4.2
+	github.com/gelembjuk/cleverchatty/core v0.4.3
 	github.com/google/uuid v1.6.0
 	github.com/gorilla/websocket v1.5.3
 	github.com/mark3labs/mcp-go v0.43.2
