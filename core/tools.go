@@ -520,6 +520,50 @@ func (host *ToolsHost) Close() error {
 	}
 	return nil
 }
+
+// RequiredToolsForInterface defines the tools required for each interface
+var RequiredToolsForInterface = map[string][]string{
+	toolsServerInterfaceMemory:     {memoryToolRememberName, memoryToolRecallName},
+	toolsServerInterfaceRAG:        {ragToolName},
+	toolsServerInterfaceServerCard: {"get_server_card"},
+	toolsServerInterfaceTasks:      {"start_task", "get_task_status"},
+}
+
+// Check if a server supports the required tools for its declared interfaces
+func (host *ToolsHost) validateServerInterfaces(serverName string, interfaces []string, availableToolNames []string) {
+	// Create a map for faster lookup
+	availableToolsMap := make(map[string]bool)
+	for _, name := range availableToolNames {
+		availableToolsMap[name] = true
+	}
+
+	for _, iface := range interfaces {
+		requiredTools, ok := RequiredToolsForInterface[iface]
+		if !ok {
+			continue // Unknown interface, ignore or maybe warn?
+		}
+
+		missingTools := []string{}
+		for _, reqTool := range requiredTools {
+			if !availableToolsMap[reqTool] {
+				missingTools = append(missingTools, reqTool)
+			}
+		}
+
+		if len(missingTools) > 0 {
+			host.logger.Printf(
+				"WARNING: Server %s declares interface %s but is missing required tools: %v\n",
+				serverName,
+				iface,
+				missingTools,
+			)
+			// We currently only warn. Stronger enforcement could be added here.
+		} else {
+			host.logger.Printf("Server %s validated for interface %s\n", serverName, iface)
+		}
+	}
+}
+
 func (host *ToolsHost) loadMCPTools(ctx context.Context) error {
 	var allTools []llm.Tool
 	for serverName, mcpClient := range host.mcpClients {
@@ -541,6 +585,13 @@ func (host *ToolsHost) loadMCPTools(ctx context.Context) error {
 			)
 			continue
 		}
+
+		// Validate interfaces
+		var availableToolNames []string
+		for _, tool := range toolsResult.Tools {
+			availableToolNames = append(availableToolNames, tool.Name)
+		}
+		host.validateServerInterfaces(serverName, config.Interfaces, availableToolNames)
 
 		filteredTools := []mcp.Tool{}
 
@@ -584,6 +635,13 @@ func (host *ToolsHost) loadA2ATools() error {
 			host.logger.Printf("Server %s not found in config\n", serverName)
 			continue
 		}
+
+		// Validate interfaces
+		var availableToolNames []string
+		for _, skill := range a2aClient.Card.Skills {
+			availableToolNames = append(availableToolNames, skill.ID)
+		}
+		host.validateServerInterfaces(serverName, config.Interfaces, availableToolNames)
 
 		serverTools := []llm.Tool{}
 

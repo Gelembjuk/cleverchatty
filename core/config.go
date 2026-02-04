@@ -10,22 +10,24 @@ import (
 )
 
 const (
-	ThisAppName                = "CleverChatty"
-	ThisAppVersion             = "0.4.2"
-	transportStdio             = "stdio"
-	transportHTTPStreaming     = "http_streaming"
-	transportSSE               = "sse"
-	transportA2A               = "a2a"
-	transportInternal          = "internal"
-	transportReverseMCP        = "reverse_mcp"
-	toolsServerInterfaceNone   = "none"
-	toolsServerInterfaceMemory = "memory"
-	toolsServerInterfaceRAG    = "rag"
-	defaultMessagesWindow      = 10
-	initialBackoff             = 1 * time.Second
-	maxBackoff                 = 30 * time.Second
-	maxRetries                 = 5    // Will reach close to max backoff
-	defaultSessionTimeout      = 3600 // Default session timeout
+	ThisAppName                    = "CleverChatty"
+	ThisAppVersion                 = "0.4.2"
+	transportStdio                 = "stdio"
+	transportHTTPStreaming         = "http_streaming"
+	transportSSE                   = "sse"
+	transportA2A                   = "a2a"
+	transportInternal              = "internal"
+	transportReverseMCP            = "reverse_mcp"
+	toolsServerInterfaceNone       = "none"
+	toolsServerInterfaceMemory     = "memory"
+	toolsServerInterfaceRAG        = "rag"
+	toolsServerInterfaceServerCard = "server_card"
+	toolsServerInterfaceTasks      = "tasks"
+	defaultMessagesWindow          = 10
+	initialBackoff                 = 1 * time.Second
+	maxBackoff                     = 30 * time.Second
+	maxRetries                     = 5    // Will reach close to max backoff
+	defaultSessionTimeout          = 3600 // Default session timeout
 )
 
 const (
@@ -121,7 +123,7 @@ type NotificationInstruction struct {
 
 type ServerConfigWrapper struct {
 	Config                   ToolsServerConfig
-	Interface                string                    `json:"interface"`
+	Interfaces               []string                  `json:"interfaces"`
 	Disabled                 bool                      `json:"disabled"`
 	Required                 bool                      `json:"required"`
 	NotificationInstructions []NotificationInstruction `json:"notification_instructions,omitempty"`
@@ -257,7 +259,7 @@ func (w *ServerConfigWrapper) UnmarshalJSON(data []byte) error {
 		Endpoint                 string                    `json:"endpoint"`
 		AuthToken                string                    `json:"auth_token"`
 		Transport                string                    `json:"transport"`
-		Interface                string                    `json:"interface"`
+		Interface                any                       `json:"interface"`
 		Disabled                 bool                      `json:"disabled"`
 		Required                 bool                      `json:"required"`
 		NotificationInstructions []NotificationInstruction `json:"notification_instructions,omitempty"`
@@ -266,7 +268,25 @@ func (w *ServerConfigWrapper) UnmarshalJSON(data []byte) error {
 	if err := json.Unmarshal(data, &typeField); err != nil {
 		return err
 	}
-	w.Interface = typeField.Interface
+
+	// Handle interface field which can be string or []string
+	if typeField.Interface != nil {
+		switch v := typeField.Interface.(type) {
+		case string:
+			if v != "" && v != toolsServerInterfaceNone {
+				w.Interfaces = []string{v}
+			}
+		case []any:
+			for _, item := range v {
+				if str, ok := item.(string); ok {
+					if str != "" && str != toolsServerInterfaceNone {
+						w.Interfaces = append(w.Interfaces, str)
+					}
+				}
+			}
+		}
+	}
+
 	w.Disabled = typeField.Disabled
 	w.Required = typeField.Required
 	w.NotificationInstructions = typeField.NotificationInstructions
@@ -326,8 +346,12 @@ func (w ServerConfigWrapper) MarshalJSON() ([]byte, error) {
 	}
 
 	// Add wrapper-level fields
-	if w.Interface != "" {
-		result["interface"] = w.Interface
+	if len(w.Interfaces) > 0 {
+		if len(w.Interfaces) == 1 {
+			result["interface"] = w.Interfaces[0]
+		} else {
+			result["interface"] = w.Interfaces
+		}
 	}
 	if w.Disabled {
 		result["disabled"] = w.Disabled
@@ -343,11 +367,21 @@ func (w ServerConfigWrapper) MarshalJSON() ([]byte, error) {
 }
 
 func (w ServerConfigWrapper) isMemoryServer() bool {
-	return w.Interface == toolsServerInterfaceMemory
+	for _, i := range w.Interfaces {
+		if i == toolsServerInterfaceMemory {
+			return true
+		}
+	}
+	return false
 }
 
 func (w ServerConfigWrapper) isRAGServer() bool {
-	return w.Interface == toolsServerInterfaceRAG
+	for _, i := range w.Interfaces {
+		if i == toolsServerInterfaceRAG {
+			return true
+		}
+	}
+	return false
 }
 
 func (w ServerConfigWrapper) isMCPServer() bool {
