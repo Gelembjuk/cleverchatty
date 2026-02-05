@@ -22,9 +22,7 @@ const (
 		"IMPORTANT: When the user's instructions say 'tell me', 'report', 'summarize', 'notify me', or 'let me know', " +
 		"you MUST use the notification_feedback tool to communicate that information to the user."
 
-	notificationSubAgentFeedbackToolDescription = "Send a message to the user about this notification. " +
-		"Use this tool when the user's instructions ask you to tell, report, summarize, or inform them about something. " +
-		"The user will see the message you provide. This is the ONLY way to communicate with the user."
+	notificationSubAgentFeedbackToolDescription_moved = "moved to internal_tools.go"
 )
 
 // MonitoringStatus indicates whether a notification is being monitored for processing
@@ -301,29 +299,23 @@ func NewNotificationProcessor(parentConfig CleverChattyConfig, ctx context.Conte
 	}
 
 	// Register the feedback tool
-	err = agent.SetTool(CustomTool{
-		Name:        "notification_feedback",
-		Description: notificationSubAgentFeedbackToolDescription,
-		Arguments: []ToolArgument{
-			{
-				Name:        "message",
-				Type:        "string",
-				Description: "The message to provide to the user. It can be Markdown formatted.",
-				Required:    true,
-			},
-		},
-		Handler: func(ctx context.Context, args map[string]interface{}) (string, error) {
-			message := args["message"].(string)
-			logger.Printf("Notification feedback to user: %s", message)
+	tool, err := NewNotificationFeedbackTool(func(ctx context.Context, args map[string]interface{}) (string, error) {
+		message := args["message"].(string)
+		logger.Printf("Notification feedback to user: %s", message)
 
-			// Call the agent message callback to deliver the message
-			if processor.agentMessageCallback != nil {
-				processor.agentMessageCallback(message)
-			}
+		// Call the agent message callback to deliver the message
+		if processor.agentMessageCallback != nil {
+			processor.agentMessageCallback(message)
+		}
 
-			return "Message delivered to user", nil
-		},
+		return "Message delivered to user", nil
 	})
+	if err != nil {
+		agent.Finish()
+		return nil, fmt.Errorf("failed to create feedback tool: %w", err)
+	}
+
+	err = agent.SetTool(tool)
 	if err != nil {
 		agent.Finish()
 		return nil, fmt.Errorf("failed to register feedback tool: %w", err)
