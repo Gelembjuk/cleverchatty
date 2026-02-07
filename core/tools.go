@@ -2,6 +2,7 @@ package core
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"log"
 	"sync"
@@ -37,22 +38,23 @@ type ReverseMCPClient interface {
 }
 
 type ToolsHost struct {
-	config           map[string]ServerConfigWrapper
-	context          context.Context
-	clientAgentID    string
-	AgentID          string
-	AgentName        string
-	logger           *log.Logger
-	mcpClients       map[string]mcpclient.MCPClient
-	a2aClients       map[string]A2AAgent
-	reverseMCPClient ReverseMCPClient
-	tools            []llm.Tool
-	toolsMux         sync.RWMutex
-	customTools      map[string]CustomTool
-	customToolsMux   sync.RWMutex
-	memoryServerName string
-	ragServerName    string
-	fileCache        *FileCache
+	config                   map[string]ServerConfigWrapper
+	context                  context.Context
+	clientAgentID            string
+	AgentID                  string
+	AgentName                string
+	logger                   *log.Logger
+	mcpClients               map[string]mcpclient.MCPClient
+	a2aClients               map[string]A2AAgent
+	reverseMCPClient         ReverseMCPClient
+	tools                    []llm.Tool
+	toolsMux                 sync.RWMutex
+	customTools              map[string]CustomTool
+	customToolsMux           sync.RWMutex
+	memoryServerName         string
+	ragServerName            string
+	fileCache                *FileCache
+	notificationTypeRegistry *NotificationTypeRegistry
 }
 
 type ToolCallResult struct {
@@ -149,10 +151,11 @@ func newToolsHost(
 	workDir string,
 ) (*ToolsHost, error) {
 	host := &ToolsHost{
-		config:    mcpServersConfig,
-		context:   ctx,
-		logger:    logger,
-		fileCache: NewFileCache(workDir, logger),
+		config:                   mcpServersConfig,
+		context:                  ctx,
+		logger:                   logger,
+		fileCache:                NewFileCache(workDir, logger),
+		notificationTypeRegistry: NewNotificationTypeRegistry(),
 	}
 
 	return host, nil
@@ -183,6 +186,9 @@ func (host *ToolsHost) Init() error {
 		host.Close()
 		return fmt.Errorf("failed to load A2A tools: %w", err)
 	}
+
+	host.loadNotificationTypesFromConfig()
+	host.loadNotificationTypesFromIntroduction(host.context)
 
 	return nil
 }
@@ -495,6 +501,100 @@ func (host *ToolsHost) createA2AClients() error {
 	host.a2aClients = clients
 
 	return nil
+}
+
+// GetNotificationTypeRegistry returns the notification type registry
+func (host *ToolsHost) GetNotificationTypeRegistry() *NotificationTypeRegistry {
+	return host.notificationTypeRegistry
+}
+
+// loadNotificationTypesFromConfig populates the registry from static config
+func (host *ToolsHost) loadNotificationTypesFromConfig() {
+	for serverName, serverConfig := range host.config {
+		for _, ni := range serverConfig.NotificationInstructions {
+			kind := ni.Kind
+			if kind == "" {
+				kind = NotificationKindBroadcast
+			}
+			host.notificationTypeRegistry.Register(NotificationType{
+				Name:        ni.Method,
+				Description: ni.Description,
+				Kind:        kind,
+				ServerName:  serverName,
+			})
+			// Also subscribe with instructions from config
+			if len(ni.Instructions) > 0 {
+				key := MakeNotificationKey(serverName, ni.Method)
+				if err := host.notificationTypeRegistry.Subscribe(key, ni.Instructions); err != nil {
+					host.logger.Printf("Failed to subscribe from config: server=%s, method=%s: %v", serverName, ni.Method, err)
+				} else {
+					host.logger.Printf("Subscribed from config: key=%s, instructions=%v", key, ni.Instructions)
+				}
+			}
+		}
+	}
+	host.logger.Printf("Loaded notification types from config: %d types", len(host.notificationTypeRegistry.GetAll()))
+}
+
+// introductionResponse represents the parsed response from an MCP server's introduction tool
+type introductionResponse struct {
+	NotificationTypes []struct {
+		Name        string           `json:"name"`
+		Description string           `json:"description"`
+		Kind        NotificationKind `json:"kind,omitempty"`
+	} `json:"notification_types,omitempty"`
+}
+
+// loadNotificationTypesFromIntroduction calls the introduction tool on each MCP server
+// and registers any discovered notification types that aren't already in the registry
+func (host *ToolsHost) loadNotificationTypesFromIntroduction(ctx context.Context) {
+	for serverName := range host.mcpClients {
+		host.callIntroductionTool(serverName, ctx)
+	}
+}
+
+// callIntroductionTool calls the introduction tool on a single MCP server
+// and registers discovered notification types (config takes precedence)
+func (host *ToolsHost) callIntroductionTool(serverName string, ctx context.Context) {
+	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
+	defer cancel()
+
+	result := host.callMCPTool(serverName, "introduction", map[string]interface{}{}, ctx)
+	if result.Error != nil {
+		host.logger.Printf("Introduction tool call failed for server %s: %v (this is expected if the server doesn't have an introduction tool)", serverName, result.Error)
+		return
+	}
+
+	textContent := result.getTextContent()
+	if textContent == "" {
+		return
+	}
+
+	var intro introductionResponse
+	if err := json.Unmarshal([]byte(textContent), &intro); err != nil {
+		host.logger.Printf("Failed to parse introduction response from server %s: %v (response was: %.100s)", serverName, err, textContent)
+		return
+	}
+
+	for _, nt := range intro.NotificationTypes {
+		// Skip if already registered from config
+		if existing := host.notificationTypeRegistry.GetNotificationType(serverName, nt.Name); existing != nil {
+			continue
+		}
+
+		kind := nt.Kind
+		if kind == "" {
+			kind = NotificationKindBroadcast
+		}
+
+		host.notificationTypeRegistry.Register(NotificationType{
+			Name:        nt.Name,
+			Description: nt.Description,
+			Kind:        kind,
+			ServerName:  serverName,
+		})
+		host.logger.Printf("Registered notification type from introduction: server=%s, name=%s", serverName, nt.Name)
+	}
 }
 
 // Check if the host has a RAG server connected

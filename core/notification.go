@@ -51,6 +51,204 @@ const (
 	ProcessingStatusFailed ProcessingStatus = "failed"
 )
 
+// NotificationKind indicates the nature of a notification type
+type NotificationKind string
+
+const (
+	// NotificationKindBroadcast means the notification is an independent event pushed to all clients
+	NotificationKindBroadcast NotificationKind = "broadcast"
+	// NotificationKindTriggered means the notification results from a previous tool call, sent only to the calling client
+	NotificationKindTriggered NotificationKind = "triggered"
+)
+
+// NotificationType describes a type of notification that a server can send
+type NotificationType struct {
+	// Name is the notification method name (e.g., "notifications/message")
+	Name string `json:"name"`
+	// Description is a human-readable description of what this notification means
+	Description string `json:"description"`
+	// Kind indicates whether this is a broadcast or triggered notification
+	Kind NotificationKind `json:"kind"`
+	// ServerName is the name of the server that supports this notification type
+	ServerName string `json:"server_name"`
+}
+
+// NotificationSubscription represents a subscription to a notification type with processing instructions
+type NotificationSubscription struct {
+	Key          string   `json:"key"`
+	Instructions []string `json:"instructions"`
+}
+
+// NotificationTypeRegistry maintains a registry of notification types per server
+type NotificationTypeRegistry struct {
+	mu            sync.RWMutex
+	types         map[string][]NotificationType          // keyed by server name
+	subscriptions map[string]*NotificationSubscription   // keyed by composite key (serverName_notificationName)
+}
+
+// NewNotificationTypeRegistry creates a new empty registry
+func NewNotificationTypeRegistry() *NotificationTypeRegistry {
+	return &NotificationTypeRegistry{
+		types:         make(map[string][]NotificationType),
+		subscriptions: make(map[string]*NotificationSubscription),
+	}
+}
+
+// notificationKeySeparator is used to join server name and notification name into a composite key.
+// Using "::" avoids ambiguity since server names may contain underscores.
+const notificationKeySeparator = "::"
+
+// MakeNotificationKey creates a composite key from server name and notification name
+func MakeNotificationKey(serverName, notificationName string) string {
+	return serverName + notificationKeySeparator + notificationName
+}
+
+// ParseNotificationKey splits a composite key into server name and notification name
+func ParseNotificationKey(key string) (serverName, notificationName string, err error) {
+	idx := strings.Index(key, notificationKeySeparator)
+	if idx < 0 {
+		return "", "", fmt.Errorf("invalid notification key: %s (expected format: serverName::notificationName)", key)
+	}
+	return key[:idx], key[idx+len(notificationKeySeparator):], nil
+}
+
+// Register adds a notification type to the registry.
+// Skips duplicates (same server + name).
+func (r *NotificationTypeRegistry) Register(nt NotificationType) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	for _, existing := range r.types[nt.ServerName] {
+		if existing.Name == nt.Name {
+			return // duplicate, skip
+		}
+	}
+	r.types[nt.ServerName] = append(r.types[nt.ServerName], nt)
+}
+
+// GetByServer returns all notification types for a given server
+func (r *NotificationTypeRegistry) GetByServer(serverName string) []NotificationType {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+
+	result := make([]NotificationType, len(r.types[serverName]))
+	copy(result, r.types[serverName])
+	return result
+}
+
+// GetAll returns all notification types across all servers
+func (r *NotificationTypeRegistry) GetAll() []NotificationType {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+
+	var all []NotificationType
+	for _, types := range r.types {
+		all = append(all, types...)
+	}
+	return all
+}
+
+// GetNotificationType returns a specific notification type by server and name
+// Returns nil if not found
+func (r *NotificationTypeRegistry) GetNotificationType(serverName, name string) *NotificationType {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+
+	for _, nt := range r.types[serverName] {
+		if nt.Name == name {
+			return &nt
+		}
+	}
+	return nil
+}
+
+// Subscribe creates or appends instructions to a subscription for the given composite key.
+// The key must map to a registered notification type.
+func (r *NotificationTypeRegistry) Subscribe(key string, instructions []string) error {
+	serverName, notifName, err := ParseNotificationKey(key)
+	if err != nil {
+		return err
+	}
+
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	// Validate that the notification type exists
+	found := false
+	for _, nt := range r.types[serverName] {
+		if nt.Name == notifName {
+			found = true
+			break
+		}
+	}
+	if !found {
+		return fmt.Errorf("notification type %s not found for server %s", notifName, serverName)
+	}
+
+	if existing, ok := r.subscriptions[key]; ok {
+		existing.Instructions = append(existing.Instructions, instructions...)
+	} else {
+		r.subscriptions[key] = &NotificationSubscription{
+			Key:          key,
+			Instructions: instructions,
+		}
+	}
+	return nil
+}
+
+// GetSubscription returns the subscription for a given composite key, or nil if not found
+func (r *NotificationTypeRegistry) GetSubscription(key string) *NotificationSubscription {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+
+	return r.subscriptions[key]
+}
+
+// GetSubscriptionByServerAndMethod returns the subscription for a given server name and method
+func (r *NotificationTypeRegistry) GetSubscriptionByServerAndMethod(serverName, method string) *NotificationSubscription {
+	key := MakeNotificationKey(serverName, method)
+	return r.GetSubscription(key)
+}
+
+// GetAllSubscriptions returns a copy of all subscriptions
+func (r *NotificationTypeRegistry) GetAllSubscriptions() map[string]*NotificationSubscription {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+
+	result := make(map[string]*NotificationSubscription, len(r.subscriptions))
+	for k, v := range r.subscriptions {
+		result[k] = v
+	}
+	return result
+}
+
+// FormatForToolDescription returns a human-readable listing of all registered
+// notification types, suitable for embedding in tool descriptions
+func (r *NotificationTypeRegistry) FormatForToolDescription() string {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+
+	if len(r.types) == 0 {
+		return "No notification types are currently registered."
+	}
+
+	var sb strings.Builder
+	sb.WriteString("Available notification types:\n")
+
+	for serverName, types := range r.types {
+		for _, nt := range types {
+			key := MakeNotificationKey(serverName, nt.Name)
+			sb.WriteString(fmt.Sprintf("- Key: %s, Kind: %s", key, string(nt.Kind)))
+			if nt.Description != "" {
+				sb.WriteString(fmt.Sprintf(", Description: %s", nt.Description))
+			}
+			sb.WriteString("\n")
+		}
+	}
+
+	return sb.String()
+}
+
 // Notification represents a unified notification structure
 // independent of the underlying protocol (MCP, A2A, etc.)
 type Notification struct {

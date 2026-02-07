@@ -89,7 +89,58 @@ func (assistant *CleverChatty) Init() error {
 		return fmt.Errorf("error initializing MCP host: %v", err)
 	}
 
+	// Register notification tools only for main agents (not subagents)
+	if assistant.processNotifications {
+		assistant.registerNotificationTools()
+	}
+
 	return nil
+}
+
+// registerNotificationTools creates and registers the get_notification_types and subscribe_notifications tools
+func (assistant *CleverChatty) registerNotificationTools() {
+	registry := assistant.toolsHost.GetNotificationTypeRegistry()
+	if registry == nil {
+		return
+	}
+
+	// Tool 1: get_notification_types
+	getTool, err := NewGetNotificationTypesTool(func(ctx context.Context, args map[string]interface{}) (string, error) {
+		result := registry.FormatForToolDescription()
+		assistant.logger.Printf("get_notification_types response: %s", result)
+		return result, nil
+	})
+	if err != nil {
+		assistant.logger.Printf("Failed to create get_notification_types tool: %v", err)
+	} else {
+		if err := assistant.SetTool(getTool); err != nil {
+			assistant.logger.Printf("Failed to register get_notification_types tool: %v", err)
+		}
+	}
+
+	// Tool 2: subscribe_notifications
+	subTool, err := NewSubscribeNotificationsTool(func(ctx context.Context, args map[string]interface{}) (string, error) {
+		notificationKey, _ := args["notification_key"].(string)
+		instructions, _ := args["instructions"].(string)
+
+		if notificationKey == "" || instructions == "" {
+			return "", fmt.Errorf("notification_key and instructions are required")
+		}
+
+		if err := registry.Subscribe(notificationKey, []string{instructions}); err != nil {
+			return "", err
+		}
+
+		assistant.logger.Printf("Subscribed via tool: key=%s, instructions=%s", notificationKey, instructions)
+		return fmt.Sprintf("Subscribed to notifications with key %s", notificationKey), nil
+	})
+	if err != nil {
+		assistant.logger.Printf("Failed to create subscribe_notifications tool: %v", err)
+	} else {
+		if err := assistant.SetTool(subTool); err != nil {
+			assistant.logger.Printf("Failed to register subscribe_notifications tool: %v", err)
+		}
+	}
 }
 
 func (assistant *CleverChatty) WithLogger(logger *log.Logger) {
@@ -159,13 +210,14 @@ func (assistant *CleverChatty) SetNotificationCallback(callback NotificationCall
 		assistant.logger.Printf("Notification wrapper received: server=%s, method=%s, monitored=%v",
 			notification.ServerName, notification.Method, notification.IsMonitored())
 
-		// Queue monitored notifications for processing
-		if assistant.processNotifications && notification.IsMonitored() && assistant.notificationProcessor != nil {
-			// Get the server config to retrieve instructions
-			if serverConfig, ok := assistant.config.ToolsServers[notification.ServerName]; ok {
-				if instructions := serverConfig.GetNotificationInstructions(notification.Method); instructions != nil && len(instructions) > 0 {
-					assistant.notificationProcessor.Enqueue(notification, instructions)
+		if assistant.processNotifications && assistant.notificationProcessor != nil {
+			registry := assistant.toolsHost.GetNotificationTypeRegistry()
+			key := MakeNotificationKey(notification.ServerName, notification.Method)
+			if sub := registry.GetSubscription(key); sub != nil {
+				if !notification.IsMonitored() {
+					notification.SetMonitored()
 				}
+				assistant.notificationProcessor.Enqueue(notification, sub.Instructions)
 			}
 		}
 

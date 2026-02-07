@@ -117,8 +117,10 @@ func (s InternalServerConfig) GetType() string {
 
 // NotificationInstruction defines instructions for handling a specific notification method
 type NotificationInstruction struct {
-	Method       string   `json:"method"`
-	Instructions []string `json:"instructions"`
+	Method       string           `json:"method"`
+	Instructions []string         `json:"instructions"`
+	Description  string           `json:"description,omitempty"`
+	Kind         NotificationKind `json:"kind,omitempty"`
 }
 
 type ServerConfigWrapper struct {

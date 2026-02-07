@@ -41,7 +41,7 @@ func (assistant *CleverChatty) handleServersCommand() string {
 
 		if server.IsMCPSSEServer() || server.IsMCPHTTPStreamingServer() {
 			result.WriteString(fmt.Sprintf("  URL: %s\n", server.Url))
-			if server.Headers != nil && len(server.Headers) > 0 {
+			if len(server.Headers) > 0 {
 				result.WriteString("  Headers:\n")
 				for _, header := range server.Headers {
 					parts := strings.SplitN(header, ":", 2)
