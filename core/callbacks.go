@@ -8,6 +8,9 @@ var (
 	CallbackCodeToolCallFailed   = "tool_error"
 	CallbackCodeMemoryRetrieval  = "memory_retrieval"
 	CallbackCodeRAGRetrieval     = "rag_retrieval"
+	CallbackCodeSessionsList     = "sessions_list"
+	CallbackCodeSessionSwitched  = "session_switched"
+	CallbackCodeSessionHistory   = "session_history"
 )
 
 type UICallbacks struct {

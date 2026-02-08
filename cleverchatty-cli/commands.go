@@ -62,6 +62,11 @@ func handleSlashCommandAsClient(prompt string, a2aClient a2aclient.A2AClient, ct
 		return false, nil
 	}
 
+	// /sessions and /session <id> are sent to the server as streaming commands
+	if cleanPrompt == "/sessions" || strings.HasPrefix(cleanPrompt, "/session ") {
+		return false, nil
+	}
+
 	switch cleanPrompt {
 	case "/help":
 		handleHelpCommand()
@@ -69,7 +74,8 @@ func handleSlashCommandAsClient(prompt string, a2aClient a2aclient.A2AClient, ct
 	case "/version":
 		handleVersionCommand()
 		return true, nil
-	case "/quit", "/bye", "/exit":
+	case "/bye":
+		// /bye: disconnect without destroying session
 		taskParams := a2aprotocol.SendMessageParams{
 			Message: a2aprotocol.Message{
 				Role: a2aprotocol.MessageRoleUser,
@@ -82,10 +88,30 @@ func handleSlashCommandAsClient(prompt string, a2aClient a2aclient.A2AClient, ct
 				},
 			},
 		}
-
 		a2aClient.SendMessage(ctx, taskParams)
-
-		tuiPrint("\nGoodbye!\n")
+		tuiPrint("\nGoodbye! (session preserved)\n")
+		if useTUIMode {
+			tuiQuit()
+		} else {
+			os.Exit(0)
+		}
+		return true, nil
+	case "/quit", "/exit":
+		// /quit, /exit: destroy session and disconnect
+		taskParams := a2aprotocol.SendMessageParams{
+			Message: a2aprotocol.Message{
+				Role: a2aprotocol.MessageRoleUser,
+				Parts: []a2aprotocol.Part{
+					a2aprotocol.NewTextPart("/quit"),
+				},
+				ContextID: &contextID,
+				Metadata: map[string]any{
+					"agent_id": agentid,
+				},
+			},
+		}
+		a2aClient.SendMessage(ctx, taskParams)
+		tuiPrint("\nGoodbye! (session destroyed)\n")
 		if useTUIMode {
 			tuiQuit()
 		} else {
@@ -93,8 +119,7 @@ func handleSlashCommandAsClient(prompt string, a2aClient a2aclient.A2AClient, ct
 		}
 		return true, nil
 	default:
-		fmt.Printf("%s\nType /help to see available commands\n\n",
-			errorStyle.Render("Unknown command: "+prompt))
+		tuiPrint(errorStyle.Render("Unknown command: "+prompt) + "\nType /help to see available commands\n\n")
 		return true, nil
 	}
 }
@@ -113,7 +138,10 @@ func handleHelpCommand() {
 	markdown.WriteString("- **/tools**: List all available tools\n")
 	markdown.WriteString("- **/servers**: List configured MCP servers\n")
 	markdown.WriteString("- **/history**: Display conversation history\n")
-	markdown.WriteString("- **/quit**, **/bye**, **/exit**: Exit the application\n")
+	markdown.WriteString("- **/sessions**: List all active sessions (client mode)\n")
+	markdown.WriteString("- **/session <id>**: Switch to a different session (client mode)\n")
+	markdown.WriteString("- **/bye**: Disconnect (preserve session for reconnecting)\n")
+	markdown.WriteString("- **/quit**, **/exit**: Exit and destroy session\n")
 	markdown.WriteString("\n## Navigation\n\n")
 	markdown.WriteString("- **PgUp/PgDn**: Scroll through chat history\n")
 	markdown.WriteString("- **Ctrl+Home/End**: Jump to top/bottom\n")

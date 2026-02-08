@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"log"
 	"strings"
@@ -130,34 +131,59 @@ func (a *A2AServer) ProcessMessage(
 	// TODO. Authentication and authorization here
 
 	if message.ContextID == nil {
-		message.ContextID = stringPtr(uuid.New().String()) // Use an empty string if no context ID is provided
+		message.ContextID = stringPtr(cleverchatty.DefaultSessionID)
 	}
 
 	a.Logger.Printf("Text message: %s", prompt)
 
-	if strings.HasPrefix(prompt, "/") {
-		if prompt == "/quit" || prompt == "/exit" || prompt == "/bye" {
-			session, err := a.SessionsManager.GetSession(*message.ContextID) // Ensure session exists
-
-			if err != nil {
-				return nil, fmt.Errorf("failed to get session: %w. Session ID: %s", err, *message.ContextID)
-			}
-
-			a.Logger.Printf("Received exit command, stopping server, removing session ID: %s", session.ID)
-			a.SessionsManager.FinishSession(session.ID) // Finish the session
-			return a.buildTextMessageResponse("Bye!"), nil
+	// Resolve session ID from special values
+	session, actualSessionID, isNew, err := a.SessionsManager.ResolveSession(*message.ContextID, agentid)
+	if err != nil {
+		// For /hello, a missing session is not fatal - try to create default
+		if prompt != "/hello" {
+			return nil, fmt.Errorf("failed to resolve session: %w. Requested ID: %s", err, *message.ContextID)
 		}
 	}
 
-	session, err := a.SessionsManager.GetOrCreateSession(*message.ContextID, agentid) // Ensure session exists
-
 	if prompt == "/hello" {
-		// in fact this is a command to test the server and agentid (and auth in the future)
-		return a.buildTextMessageResponse("hello!"), nil
+		helloResponse := map[string]interface{}{
+			"status":     "ok",
+			"session_id": actualSessionID,
+			"is_default": session != nil && session.IsDefault,
+			"is_new":     isNew,
+		}
+		if session != nil {
+			helloResponse["name"] = session.Name
+		}
+		jsonBytes, _ := json.Marshal(helloResponse)
+		return a.buildTextMessageResponse(string(jsonBytes)), nil
 	}
 
 	if err != nil {
-		return nil, fmt.Errorf("failed to get or create session: %w", err)
+		return nil, fmt.Errorf("failed to resolve session: %w", err)
+	}
+
+	if strings.HasPrefix(prompt, "/") {
+		if prompt == "/bye" {
+			// /bye: disconnect without destroying the session
+			return a.buildTextMessageResponse("Bye!"), nil
+		}
+		if prompt == "/quit" || prompt == "/exit" {
+			// /quit, /exit: destroy the session (no-op for default)
+			a.Logger.Printf("Received quit command, removing session ID: %s", actualSessionID)
+			a.SessionsManager.FinishSession(actualSessionID)
+			return a.buildTextMessageResponse("Session finished. Bye!"), nil
+		}
+		if prompt == "/sessions" {
+			return a.handleSessionsListCommand(options, handle, actualSessionID)
+		}
+		if strings.HasPrefix(prompt, "/session ") {
+			targetID := strings.TrimSpace(strings.TrimPrefix(prompt, "/session "))
+			return a.handleSessionSwitchCommand(options, handle, actualSessionID, targetID, agentid)
+		}
+		if prompt == "/__get_history__" {
+			return a.handleGetHistoryCommand(options, handle, actualSessionID)
+		}
 	}
 
 	if !options.Streaming {
@@ -321,6 +347,194 @@ func (a *A2AServer) statusFailed(err error, taskID string, contextID string, sub
 	if err != nil {
 		a.Logger.Fatalf("Failed to report failed event: %v", err)
 	}
+}
+
+// handleSessionsListCommand sends the list of sessions as a streaming event
+func (a *A2AServer) handleSessionsListCommand(
+	options a2ataskmanager.ProcessOptions,
+	handle a2ataskmanager.TaskHandler,
+	contextID string,
+) (*a2ataskmanager.MessageProcessingResult, error) {
+	sessions := a.SessionsManager.GetSessionsList()
+	jsonBytes, err := json.Marshal(sessions)
+	if err != nil {
+		return nil, fmt.Errorf("failed to marshal sessions list: %w", err)
+	}
+
+	if !options.Streaming {
+		return a.buildTextMessageResponse(string(jsonBytes)), nil
+	}
+
+	taskID, err := handle.BuildTask(nil, nil)
+	if err != nil {
+		return nil, fmt.Errorf("failed to build task: %w", err)
+	}
+	subscriber, err := handle.SubScribeTask(&taskID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to subscribe to task: %w", err)
+	}
+
+	go func() {
+		defer subscriber.Close()
+
+		a.statusUpdate(cleverchatty.CallbackCodeSessionsList, string(jsonBytes), "", taskID, contextID, subscriber)
+
+		completeEvent := a2aprotocol.StreamingMessageEvent{
+			Result: &a2aprotocol.TaskStatusUpdateEvent{
+				TaskID:    taskID,
+				ContextID: contextID,
+				Kind:      "status-update",
+				Status: a2aprotocol.TaskStatus{
+					State: a2aprotocol.TaskStateCompleted,
+					Message: &a2aprotocol.Message{
+						MessageID: uuid.New().String(),
+						Kind:      "message",
+						Role:      a2aprotocol.MessageRoleAgent,
+						Parts:     []a2aprotocol.Part{a2aprotocol.NewTextPart("done")},
+					},
+				},
+				Final: true,
+			},
+		}
+		subscriber.Send(completeEvent)
+	}()
+
+	return &a2ataskmanager.MessageProcessingResult{
+		StreamingEvents: subscriber,
+	}, nil
+}
+
+// handleSessionSwitchCommand sends session switch info + history as a streaming event
+func (a *A2AServer) handleSessionSwitchCommand(
+	options a2ataskmanager.ProcessOptions,
+	handle a2ataskmanager.TaskHandler,
+	contextID string,
+	targetID string,
+	agentid string,
+) (*a2ataskmanager.MessageProcessingResult, error) {
+	// Resolve target session — supports "new", "default", "main", or existing ID
+	targetSession, actualID, _, err := a.SessionsManager.ResolveSession(targetID, agentid)
+	if err != nil {
+		return a.buildTextMessageResponse(fmt.Sprintf("Session %q not found", targetID)), nil
+	}
+
+	// Get history for target session
+	history, err := a.SessionsManager.GetSessionHistory(actualID)
+	if err != nil {
+		history = nil // Non-fatal
+	}
+
+	payload := map[string]interface{}{
+		"session_id": actualID,
+		"name":       targetSession.Name,
+		"is_default": targetSession.IsDefault,
+		"messages":   history,
+	}
+	jsonBytes, err := json.Marshal(payload)
+	if err != nil {
+		return nil, fmt.Errorf("failed to marshal session switch data: %w", err)
+	}
+
+	if !options.Streaming {
+		return a.buildTextMessageResponse(string(jsonBytes)), nil
+	}
+
+	taskID, err := handle.BuildTask(nil, nil)
+	if err != nil {
+		return nil, fmt.Errorf("failed to build task: %w", err)
+	}
+	subscriber, err := handle.SubScribeTask(&taskID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to subscribe to task: %w", err)
+	}
+
+	go func() {
+		defer subscriber.Close()
+
+		a.statusUpdate(cleverchatty.CallbackCodeSessionSwitched, string(jsonBytes), "", taskID, contextID, subscriber)
+
+		completeEvent := a2aprotocol.StreamingMessageEvent{
+			Result: &a2aprotocol.TaskStatusUpdateEvent{
+				TaskID:    taskID,
+				ContextID: contextID,
+				Kind:      "status-update",
+				Status: a2aprotocol.TaskStatus{
+					State: a2aprotocol.TaskStateCompleted,
+					Message: &a2aprotocol.Message{
+						MessageID: uuid.New().String(),
+						Kind:      "message",
+						Role:      a2aprotocol.MessageRoleAgent,
+						Parts:     []a2aprotocol.Part{a2aprotocol.NewTextPart("done")},
+					},
+				},
+				Final: true,
+			},
+		}
+		subscriber.Send(completeEvent)
+	}()
+
+	return &a2ataskmanager.MessageProcessingResult{
+		StreamingEvents: subscriber,
+	}, nil
+}
+
+// handleGetHistoryCommand sends session history as a streaming event
+func (a *A2AServer) handleGetHistoryCommand(
+	options a2ataskmanager.ProcessOptions,
+	handle a2ataskmanager.TaskHandler,
+	sessionID string,
+) (*a2ataskmanager.MessageProcessingResult, error) {
+	history, err := a.SessionsManager.GetSessionHistory(sessionID)
+	if err != nil {
+		history = []cleverchatty.SessionHistoryMessage{} // Empty if error
+	}
+
+	jsonBytes, err := json.Marshal(history)
+	if err != nil {
+		return nil, fmt.Errorf("failed to marshal history: %w", err)
+	}
+
+	if !options.Streaming {
+		return a.buildTextMessageResponse(string(jsonBytes)), nil
+	}
+
+	taskID, err := handle.BuildTask(nil, nil)
+	if err != nil {
+		return nil, fmt.Errorf("failed to build task: %w", err)
+	}
+	subscriber, err := handle.SubScribeTask(&taskID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to subscribe to task: %w", err)
+	}
+
+	go func() {
+		defer subscriber.Close()
+
+		a.statusUpdate(cleverchatty.CallbackCodeSessionHistory, string(jsonBytes), "", taskID, sessionID, subscriber)
+
+		completeEvent := a2aprotocol.StreamingMessageEvent{
+			Result: &a2aprotocol.TaskStatusUpdateEvent{
+				TaskID:    taskID,
+				ContextID: sessionID,
+				Kind:      "status-update",
+				Status: a2aprotocol.TaskStatus{
+					State: a2aprotocol.TaskStateCompleted,
+					Message: &a2aprotocol.Message{
+						MessageID: uuid.New().String(),
+						Kind:      "message",
+						Role:      a2aprotocol.MessageRoleAgent,
+						Parts:     []a2aprotocol.Part{a2aprotocol.NewTextPart("done")},
+					},
+				},
+				Final: true,
+			},
+		}
+		subscriber.Send(completeEvent)
+	}()
+
+	return &a2ataskmanager.MessageProcessingResult{
+		StreamingEvents: subscriber,
+	}, nil
 }
 
 // handleNotificationSubscription handles persistent notification subscription requests

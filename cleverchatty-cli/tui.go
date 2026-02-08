@@ -29,6 +29,16 @@ type initCompleteMsg struct {
 	cleverChatty interface{}
 	err          error
 }
+type sessionsListMsg struct {
+	sessions []cleverchatty.SessionInfo
+}
+type sessionSwitchedMsg struct {
+	sessionID string
+	messages  []cleverchatty.SessionHistoryMessage
+}
+type sessionHistoryMsg struct {
+	messages []cleverchatty.SessionHistoryMessage
+}
 
 // TUI model
 type tuiModel struct {
@@ -310,6 +320,45 @@ func (m tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.input.Focus()
 		}
 
+	case sessionsListMsg:
+		text := formatSessionsList(msg.sessions)
+		if m.ready && m.chatViewport.Width > 0 {
+			text = wordwrap.String(text, m.chatViewport.Width)
+		}
+		m.chatContent.WriteString(text)
+		m.chatViewport.SetContent(m.chatContent.String())
+		m.chatViewport.GotoBottom()
+
+	case sessionSwitchedMsg:
+		// Clear chat and display history from the new session
+		m.chatContent.Reset()
+		welcomeStyle := lipgloss.NewStyle().Foreground(tokyoCyan).Bold(true)
+		infoStyle := lipgloss.NewStyle().Foreground(tokyoFg)
+		m.chatContent.WriteString(welcomeStyle.Render(fmt.Sprintf("Switched to session: %s", msg.sessionID)))
+		m.chatContent.WriteString("\n")
+		m.chatContent.WriteString(infoStyle.Render("Type /help for available commands."))
+		m.chatContent.WriteString("\n")
+		if len(msg.messages) > 0 {
+			text := formatHistoryMessages(msg.messages)
+			if m.ready && m.chatViewport.Width > 0 {
+				text = wordwrap.String(text, m.chatViewport.Width)
+			}
+			m.chatContent.WriteString(text)
+		}
+		m.chatViewport.SetContent(m.chatContent.String())
+		m.chatViewport.GotoBottom()
+
+	case sessionHistoryMsg:
+		if len(msg.messages) > 0 {
+			text := formatHistoryMessages(msg.messages)
+			if m.ready && m.chatViewport.Width > 0 {
+				text = wordwrap.String(text, m.chatViewport.Width)
+			}
+			m.chatContent.WriteString(text)
+			m.chatViewport.SetContent(m.chatContent.String())
+			m.chatViewport.GotoBottom()
+		}
+
 	case quitMsg:
 		return m, tea.Quit
 	}
@@ -480,4 +529,64 @@ func tuiSendAgentMessage(message string) {
 	if program != nil {
 		program.Send(agentMessageMsg{message: message})
 	}
+}
+
+func tuiSendSessionsList(sessions []cleverchatty.SessionInfo) {
+	if program != nil {
+		program.Send(sessionsListMsg{sessions: sessions})
+	}
+}
+
+func tuiSendSessionSwitched(sessionID string, messages []cleverchatty.SessionHistoryMessage) {
+	if program != nil {
+		program.Send(sessionSwitchedMsg{sessionID: sessionID, messages: messages})
+	}
+}
+
+func tuiSendSessionHistory(messages []cleverchatty.SessionHistoryMessage) {
+	if program != nil {
+		program.Send(sessionHistoryMsg{messages: messages})
+	}
+}
+
+// formatSessionsList formats a list of sessions for display
+func formatSessionsList(sessions []cleverchatty.SessionInfo) string {
+	var b strings.Builder
+	separator := separatorStyle.Render("─────────────────────────────────────────────────")
+	titleStyle := lipgloss.NewStyle().Foreground(tokyoCyan).Bold(true)
+	idStyle := lipgloss.NewStyle().Foreground(tokyoPurple)
+	nameStyle := lipgloss.NewStyle().Foreground(tokyoFg)
+	defaultTag := lipgloss.NewStyle().Foreground(tokyoGreen).Bold(true)
+
+	b.WriteString(fmt.Sprintf("\n%s\n%s\n\n", separator, titleStyle.Render("Active Sessions")))
+
+	if len(sessions) == 0 {
+		b.WriteString("  No active sessions.\n")
+	} else {
+		for _, s := range sessions {
+			line := fmt.Sprintf("  %s  %s", idStyle.Render(s.ID), nameStyle.Render(s.Name))
+			if s.IsDefault {
+				line += "  " + defaultTag.Render("[default]")
+			}
+			b.WriteString(line + "\n")
+		}
+	}
+	b.WriteString("\n")
+	return b.String()
+}
+
+// formatHistoryMessages formats session history messages for display
+func formatHistoryMessages(messages []cleverchatty.SessionHistoryMessage) string {
+	var b strings.Builder
+	separator := separatorStyle.Render("─────────────────────────────────────────────────")
+
+	for _, msg := range messages {
+		b.WriteString(fmt.Sprintf("\n%s\n", separator))
+		if msg.Role == "user" {
+			b.WriteString(fmt.Sprintf("%s\n%s\n", promptStyle.Render("You:"), msg.Text))
+		} else {
+			b.WriteString(fmt.Sprintf("%s\n%s\n", responseStyle.Render("Assistant:"), msg.Text))
+		}
+	}
+	return b.String()
 }

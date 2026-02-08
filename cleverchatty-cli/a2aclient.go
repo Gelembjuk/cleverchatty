@@ -70,10 +70,18 @@ func checkServerIsCleverChatty(serverURL string) (bool, error) {
 	}
 	return false, nil // Not a CleverChatty server
 }
-func sendHelloMessage(ctx context.Context, serverURL string, agentid string, ContextID *string) error {
+type HelloResponse struct {
+	Status    string `json:"status"`
+	SessionID string `json:"session_id"`
+	Name      string `json:"name"`
+	IsDefault bool   `json:"is_default"`
+	IsNew     bool   `json:"is_new"`
+}
+
+func sendHelloMessage(ctx context.Context, serverURL string, agentid string, contextID *string) (*HelloResponse, error) {
 	a2aClient, err := a2aclient.NewA2AClient(serverURL)
 	if err != nil {
-		return fmt.Errorf("error creating A2A client: %v", err)
+		return nil, fmt.Errorf("error creating A2A client: %v", err)
 	}
 	taskParams := a2aprotocol.SendMessageParams{
 		Message: a2aprotocol.Message{
@@ -81,16 +89,35 @@ func sendHelloMessage(ctx context.Context, serverURL string, agentid string, Con
 			Parts: []a2aprotocol.Part{
 				a2aprotocol.NewTextPart("/hello"),
 			},
-			ContextID: ContextID,
+			ContextID: contextID,
 			Metadata: map[string]any{
 				"agent_id": agentid,
 			},
 		},
 	}
 
-	_, err = a2aClient.SendMessage(ctx, taskParams)
+	messageResult, err := a2aClient.SendMessage(ctx, taskParams)
+	if err != nil {
+		return nil, err
+	}
 
-	return err
+	// Extract text from result message
+	if messageResult != nil {
+		if msg, ok := messageResult.Result.(*a2aprotocol.Message); ok {
+			for _, part := range msg.Parts {
+				if textPart, ok := part.(*a2aprotocol.TextPart); ok {
+					var helloResp HelloResponse
+					if jsonErr := json.Unmarshal([]byte(textPart.Text), &helloResp); jsonErr == nil {
+						return &helloResp, nil
+					}
+					// Fallback: old server that returns plain "hello!"
+					return &HelloResponse{Status: "ok"}, nil
+				}
+			}
+		}
+	}
+
+	return &HelloResponse{Status: "ok"}, nil
 }
 func processA2AStreamEvents(ctx context.Context,
 	streamChan <-chan a2aprotocol.StreamingMessageEvent,
@@ -134,6 +161,12 @@ func processA2AStreamEvents(ctx context.Context,
 							callbacks.CallMemoryRetrievalStarted()
 						case cleverchatty.CallbackCodeRAGRetrieval:
 							callbacks.CallRAGRetrievalStarted()
+						case cleverchatty.CallbackCodeSessionsList:
+							handleSessionsListEvent(statusMessage)
+						case cleverchatty.CallbackCodeSessionSwitched:
+							handleSessionSwitchedEvent(statusMessage)
+						case cleverchatty.CallbackCodeSessionHistory:
+							handleSessionHistoryEvent(statusMessage)
 						default:
 							//
 						}
@@ -164,5 +197,41 @@ func processA2AStreamEvents(ctx context.Context,
 				//
 			}
 		}
+	}
+}
+
+func handleSessionsListEvent(jsonPayload string) {
+	var sessions []cleverchatty.SessionInfo
+	if err := json.Unmarshal([]byte(jsonPayload), &sessions); err != nil {
+		tuiSendChat(errorStyle.Render(fmt.Sprintf("Error parsing sessions list: %v", err)) + "\n")
+		return
+	}
+	tuiSendSessionsList(sessions)
+}
+
+func handleSessionSwitchedEvent(jsonPayload string) {
+	var payload struct {
+		SessionID string                            `json:"session_id"`
+		Name      string                            `json:"name"`
+		IsDefault bool                              `json:"is_default"`
+		Messages  []cleverchatty.SessionHistoryMessage `json:"messages"`
+	}
+	if err := json.Unmarshal([]byte(jsonPayload), &payload); err != nil {
+		tuiSendChat(errorStyle.Render(fmt.Sprintf("Error parsing session switch: %v", err)) + "\n")
+		return
+	}
+	// Update the global context ID to point to the new session
+	tuiContextID = payload.SessionID
+	tuiSendSessionSwitched(payload.SessionID, payload.Messages)
+}
+
+func handleSessionHistoryEvent(jsonPayload string) {
+	var messages []cleverchatty.SessionHistoryMessage
+	if err := json.Unmarshal([]byte(jsonPayload), &messages); err != nil {
+		tuiSendChat(errorStyle.Render(fmt.Sprintf("Error parsing session history: %v", err)) + "\n")
+		return
+	}
+	if len(messages) > 0 {
+		tuiSendSessionHistory(messages)
 	}
 }

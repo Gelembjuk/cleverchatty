@@ -204,21 +204,6 @@ func runServer() error {
 
 	commonContext, commonContextCancel := context.WithCancel(context.Background())
 
-	// Test-init the assistant to verify configuration is valid before starting the server
-	logger.Println("Verifying assistant initialization...")
-	testAI, err := cleverchatty.GetCleverChattyWithLogger(*config, commonContext, logger)
-	if err != nil {
-		commonContextCancel()
-		return fmt.Errorf("assistant init check failed: %v", err)
-	}
-	err = testAI.Init()
-	if err != nil {
-		commonContextCancel()
-		return fmt.Errorf("assistant init check failed: %v", err)
-	}
-	testAI.Finish()
-	logger.Println("Assistant initialization verified successfully.")
-
 	sessions_manager := cleverchatty.NewSessionManager(config, commonContext, logger)
 	sessions_manager.StartCleanupLoop()
 
@@ -235,16 +220,9 @@ func runServer() error {
 			commonContextCancel()
 			return fmt.Errorf("failed to initialize A2A server: %v", err)
 		}
-		err = a2aServer.Start()
-		if err != nil {
-			commonContextCancel()
-			return fmt.Errorf("failed to start A2A server: %v", err)
-		}
-		logger.Println("A2A server started successfully.")
 
 		// Set notification callback to broadcast notifications to A2A clients
 		sessions_manager.SetNotificationCallback(func(notification cleverchatty.Notification) {
-			// Broadcast the notification to all A2A notification subscribers
 			a2aServer.BroadcastNotification(notification)
 		})
 		logger.Println("MCP notification broadcasting to A2A clients enabled.")
@@ -254,6 +232,21 @@ func runServer() error {
 			a2aServer.BroadcastAgentMessage(message)
 		})
 		logger.Println("Agent message broadcasting to A2A clients enabled.")
+
+		// Create default session before starting the server so it's ready when clients connect
+		err = sessions_manager.CreateDefaultSession("")
+		if err != nil {
+			commonContextCancel()
+			return fmt.Errorf("failed to create default session: %v", err)
+		}
+		logger.Println("Default session created successfully.")
+
+		err = a2aServer.Start()
+		if err != nil {
+			commonContextCancel()
+			return fmt.Errorf("failed to start A2A server: %v", err)
+		}
+		logger.Println("A2A server started successfully.")
 	}
 
 	// Initialize Reverse MCP connector if enabled

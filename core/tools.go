@@ -572,7 +572,7 @@ func (host *ToolsHost) callIntroductionTool(serverName string, ctx context.Conte
 
 	var intro introductionResponse
 	if err := json.Unmarshal([]byte(textContent), &intro); err != nil {
-		host.logger.Printf("Failed to parse introduction response from server %s: %v (response was: %.100s)", serverName, err, textContent)
+		host.logger.Printf("Failed to parse introduction response from server %s: %v", serverName, err)
 		return
 	}
 

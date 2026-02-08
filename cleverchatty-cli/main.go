@@ -3,6 +3,7 @@ package main
 import (
 	"bufio"
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -16,7 +17,6 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/huh"
 	cleverchatty "github.com/gelembjuk/cleverchatty/core"
-	"github.com/google/uuid"
 	"github.com/spf13/cobra"
 	a2aclient "trpc.group/trpc-go/trpc-a2a-go/client"
 	a2aprotocol "trpc.group/trpc-go/trpc-a2a-go/protocol"
@@ -30,6 +30,8 @@ var (
 	debugMode        bool
 	server           string //A2A server address
 	agentid          string // A2A user ID
+	sessionFlag      string // Session ID: "default", "new", or specific ID
+	listSessions     bool   // List sessions and exit
 	configFile       string
 	modelFlag        string // New flag for model selection
 	promptFlag       string // Single prompt mode
@@ -172,6 +174,10 @@ func init() {
 		StringVar(&server, "server", "", "CleverChatty server address.")
 	rootCmd.PersistentFlags().
 		StringVar(&agentid, "agentid", "", "Agent ID to be identified by CleverChatty server.")
+	rootCmd.PersistentFlags().
+		StringVar(&sessionFlag, "session", "default", "Session ID to connect to (\"default\", \"new\", or a specific session ID).")
+	rootCmd.PersistentFlags().
+		BoolVar(&listSessions, "sessions", false, "List active sessions on the server and exit.")
 	rootCmd.PersistentFlags().
 		StringVarP(&modelFlag, "model", "m", "",
 			"model to use (format: provider:model, e.g. anthropic:claude-3-5-sonnet-latest or ollama:qwen2.5:3b). If not provided then "+defaultModelFlag+" will be used")
@@ -836,7 +842,7 @@ func handleNotificationEvent(event a2aprotocol.StreamingMessageEvent) {
 	}
 }
 
-func runAsClientWithTUI(ctx context.Context, a2aClient *a2aclient.A2AClient, contextID string, agentID string) error {
+func runAsClientWithTUI(ctx context.Context, a2aClient *a2aclient.A2AClient, contextID string, agentID string, isNewSession bool) error {
 	// Store client info globally for TUI callbacks
 	tuiContext = ctx
 	tuiA2AClient = a2aClient
@@ -942,6 +948,15 @@ func runAsClientWithTUI(ctx context.Context, a2aClient *a2aclient.A2AClient, con
 	model := newTUIModel(true, promptCallback)
 	program = tea.NewProgram(model, tea.WithAltScreen())
 
+	// If joining an existing session, request history after TUI starts
+	if !isNewSession {
+		go func() {
+			// Wait briefly for TUI to initialize
+			time.Sleep(500 * time.Millisecond)
+			sendStreamingCommand(ctx, a2aClient, tuiContextID, agentID, "/__get_history__")
+		}()
+	}
+
 	// Run the program
 	var runErr error
 	_, runErr = program.Run()
@@ -988,6 +1003,81 @@ func runAsClientWithTUI(ctx context.Context, a2aClient *a2aclient.A2AClient, con
 	return nil
 }
 
+// runListSessions sends /sessions to the server, prints the list to stdout, and exits.
+func runListSessions(ctx context.Context, a2aClient *a2aclient.A2AClient, contextID string, agentID string) error {
+	message := a2aprotocol.Message{
+		Role: a2aprotocol.MessageRoleUser,
+		Parts: []a2aprotocol.Part{
+			a2aprotocol.NewTextPart("/sessions"),
+		},
+		ContextID: &contextID,
+		Metadata: map[string]any{
+			"agent_id": agentID,
+		},
+	}
+	taskParams := a2aprotocol.SendMessageParams{
+		Message: message,
+	}
+	streamChan, err := a2aClient.StreamMessage(ctx, taskParams)
+	if err != nil {
+		return fmt.Errorf("error requesting sessions: %v", err)
+	}
+
+	// Process stream events and extract the sessions list JSON
+	for event := range streamChan {
+		if e, ok := event.Result.(*a2aprotocol.TaskStatusUpdateEvent); ok {
+			if e.Status.State == a2aprotocol.TaskStateWorking &&
+				e.Status.Message != nil && len(e.Status.Message.Parts) >= 2 {
+				code := e.Status.Message.Parts[0].(*a2aprotocol.TextPart).Text
+				if code == cleverchatty.CallbackCodeSessionsList {
+					payload := e.Status.Message.Parts[1].(*a2aprotocol.TextPart).Text
+					var sessions []cleverchatty.SessionInfo
+					if jsonErr := json.Unmarshal([]byte(payload), &sessions); jsonErr != nil {
+						return fmt.Errorf("error parsing sessions: %v", jsonErr)
+					}
+					if len(sessions) == 0 {
+						fmt.Println("No active sessions.")
+					} else {
+						fmt.Printf("%-40s  %-25s  %s\n", "ID", "NAME", "DEFAULT")
+						fmt.Printf("%-40s  %-25s  %s\n", "──", "────", "───────")
+						for _, s := range sessions {
+							def := ""
+							if s.IsDefault {
+								def = "yes"
+							}
+							fmt.Printf("%-40s  %-25s  %s\n", s.ID, s.Name, def)
+						}
+					}
+					return nil
+				}
+			}
+		}
+	}
+	return nil
+}
+
+// sendStreamingCommand sends a command to the server via streaming and processes the events
+func sendStreamingCommand(ctx context.Context, a2aClient *a2aclient.A2AClient, contextID string, agentID string, command string) {
+	message := a2aprotocol.Message{
+		Role: a2aprotocol.MessageRoleUser,
+		Parts: []a2aprotocol.Part{
+			a2aprotocol.NewTextPart(command),
+		},
+		ContextID: &contextID,
+		Metadata: map[string]any{
+			"agent_id": agentID,
+		},
+	}
+	taskParams := a2aprotocol.SendMessageParams{
+		Message: message,
+	}
+	streamChan, err := a2aClient.StreamMessage(ctx, taskParams)
+	if err != nil {
+		return
+	}
+	processA2AStreamEvents(ctx, streamChan, composeCallbacks(true))
+}
+
 func runAsClient(ctx context.Context) error {
 	// 1. Check for streaming capability by fetching the agent card
 	check, err := checkServerIsCleverChatty(server)
@@ -995,15 +1085,19 @@ func runAsClient(ctx context.Context) error {
 		return fmt.Errorf("error checking server capabilities: %v", err)
 	}
 
-	// context id
-	contextID := fmt.Sprintf("session-%d-%s", time.Now().UnixNano(), uuid.New().String())
+	// Use sessionFlag as the context ID for session resolution on the server
+	contextID := sessionFlag
 
-	err = sendHelloMessage(ctx, server, agentid, &contextID)
+	helloResp, err := sendHelloMessage(ctx, server, agentid, &contextID)
 	if err != nil {
-		// If the server does not support CleverChatty AI chat, we return an error
-		// probably, agentid is not set or is wrong
 		return err
 	}
+
+	// Use the actual session ID returned by the server
+	if helloResp.SessionID != "" {
+		contextID = helloResp.SessionID
+	}
+	isNewSession := helloResp.IsNew
 
 	// 2. Create a new client instance with custom HTTP client for long-lived connections
 	// Use no timeout for SSE streams (notification subscriptions are persistent)
@@ -1019,6 +1113,10 @@ func runAsClient(ctx context.Context) error {
 		return fmt.Errorf("the server at %s does not support CleverChatty AI chat", server)
 	}
 
+	if listSessions {
+		return runListSessions(ctx, a2aClient, contextID, agentid)
+	}
+
 	if promptFlag != "" {
 		return runSinglePromptClient(ctx, a2aClient, contextID, agentid)
 	}
@@ -1028,7 +1126,7 @@ func runAsClient(ctx context.Context) error {
 	}
 
 	// Always use TUI in client mode
-	return runAsClientWithTUI(ctx, a2aClient, contextID, agentid)
+	return runAsClientWithTUI(ctx, a2aClient, contextID, agentid, isNewSession)
 }
 
 func main() {
