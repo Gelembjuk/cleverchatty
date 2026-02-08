@@ -32,6 +32,8 @@ var (
 	agentid          string // A2A user ID
 	sessionFlag      string // Session ID: "default", "new", or specific ID
 	listSessions     bool   // List sessions and exit
+	quitAllSessions  bool   // Quit all non-default sessions and exit
+	quitSessionID    string // Quit a specific session by ID and exit
 	configFile       string
 	modelFlag        string // New flag for model selection
 	promptFlag       string // Single prompt mode
@@ -178,6 +180,10 @@ func init() {
 		StringVar(&sessionFlag, "session", "default", "Session ID to connect to (\"default\", \"new\", or a specific session ID).")
 	rootCmd.PersistentFlags().
 		BoolVar(&listSessions, "sessions", false, "List active sessions on the server and exit.")
+	rootCmd.PersistentFlags().
+		BoolVar(&quitAllSessions, "quit-all-sessions", false, "Destroy all non-default sessions on the server and exit.")
+	rootCmd.PersistentFlags().
+		StringVar(&quitSessionID, "quit-session", "", "Destroy a specific session by ID on the server and exit.")
 	rootCmd.PersistentFlags().
 		StringVarP(&modelFlag, "model", "m", "",
 			"model to use (format: provider:model, e.g. anthropic:claude-3-5-sonnet-latest or ollama:qwen2.5:3b). If not provided then "+defaultModelFlag+" will be used")
@@ -1056,6 +1062,48 @@ func runListSessions(ctx context.Context, a2aClient *a2aclient.A2AClient, contex
 	return nil
 }
 
+// runQuitSession sends a command to destroy a specific session and prints the result.
+func runQuitSession(ctx context.Context, a2aClient *a2aclient.A2AClient, contextID string, agentID string, targetID string) error {
+	return runSimpleServerCommand(ctx, a2aClient, contextID, agentID, "/__quit_session__ "+targetID)
+}
+
+// runQuitAllSessions sends a command to destroy all non-default sessions and prints the result.
+func runQuitAllSessions(ctx context.Context, a2aClient *a2aclient.A2AClient, contextID string, agentID string) error {
+	return runSimpleServerCommand(ctx, a2aClient, contextID, agentID, "/__quit_all_sessions__")
+}
+
+// runSimpleServerCommand sends a non-streaming message to the server and prints the text response.
+func runSimpleServerCommand(ctx context.Context, a2aClient *a2aclient.A2AClient, contextID string, agentID string, command string) error {
+	message := a2aprotocol.Message{
+		Role: a2aprotocol.MessageRoleUser,
+		Parts: []a2aprotocol.Part{
+			a2aprotocol.NewTextPart(command),
+		},
+		ContextID: &contextID,
+		Metadata: map[string]any{
+			"agent_id": agentID,
+		},
+	}
+	taskParams := a2aprotocol.SendMessageParams{
+		Message: message,
+	}
+	result, err := a2aClient.SendMessage(ctx, taskParams)
+	if err != nil {
+		return fmt.Errorf("error: %v", err)
+	}
+	if result != nil {
+		if msg, ok := result.Result.(*a2aprotocol.Message); ok {
+			for _, part := range msg.Parts {
+				if textPart, ok := part.(*a2aprotocol.TextPart); ok {
+					fmt.Println(textPart.Text)
+					return nil
+				}
+			}
+		}
+	}
+	return nil
+}
+
 // sendStreamingCommand sends a command to the server via streaming and processes the events
 func sendStreamingCommand(ctx context.Context, a2aClient *a2aclient.A2AClient, contextID string, agentID string, command string) {
 	message := a2aprotocol.Message{
@@ -1115,6 +1163,14 @@ func runAsClient(ctx context.Context) error {
 
 	if listSessions {
 		return runListSessions(ctx, a2aClient, contextID, agentid)
+	}
+
+	if quitAllSessions {
+		return runQuitAllSessions(ctx, a2aClient, contextID, agentid)
+	}
+
+	if quitSessionID != "" {
+		return runQuitSession(ctx, a2aClient, contextID, agentid, quitSessionID)
 	}
 
 	if promptFlag != "" {

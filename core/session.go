@@ -300,3 +300,21 @@ func (sm *SessionManager) FinishSession(id string) {
 		delete(sm.sessions, id)
 	}
 }
+
+// FinishAllNonDefaultSessions destroys all sessions except the default one.
+// Returns the number of sessions removed.
+func (sm *SessionManager) FinishAllNonDefaultSessions() int {
+	sm.mutex.Lock()
+	defer sm.mutex.Unlock()
+
+	removed := 0
+	for id, session := range sm.sessions {
+		if session.IsDefault {
+			continue
+		}
+		session.AI.Finish()
+		delete(sm.sessions, id)
+		removed++
+	}
+	return removed
+}

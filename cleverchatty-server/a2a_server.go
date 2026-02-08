@@ -184,6 +184,15 @@ func (a *A2AServer) ProcessMessage(
 		if prompt == "/__get_history__" {
 			return a.handleGetHistoryCommand(options, handle, actualSessionID)
 		}
+		if strings.HasPrefix(prompt, "/__quit_session__ ") {
+			targetID := strings.TrimSpace(strings.TrimPrefix(prompt, "/__quit_session__ "))
+			a.SessionsManager.FinishSession(targetID)
+			return a.buildTextMessageResponse(fmt.Sprintf("Session %q finished.", targetID)), nil
+		}
+		if prompt == "/__quit_all_sessions__" {
+			removed := a.SessionsManager.FinishAllNonDefaultSessions()
+			return a.buildTextMessageResponse(fmt.Sprintf("Finished %d session(s). Default session preserved.", removed)), nil
+		}
 	}
 
 	if !options.Streaming {
