@@ -11,7 +11,7 @@ import (
 
 const (
 	ThisAppName                    = "CleverChatty"
-	ThisAppVersion                 = "0.4.2"
+	ThisAppVersion                 = "0.4.4"
 	transportStdio                 = "stdio"
 	transportHTTPStreaming         = "http_streaming"
 	transportSSE                   = "sse"
