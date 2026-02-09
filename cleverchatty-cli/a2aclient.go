@@ -167,6 +167,8 @@ func processA2AStreamEvents(ctx context.Context,
 							handleSessionSwitchedEvent(statusMessage)
 						case cleverchatty.CallbackCodeSessionHistory:
 							handleSessionHistoryEvent(statusMessage)
+						case cleverchatty.CallbackCodeEventHandlers:
+							handleEventHandlersEvent(statusMessage)
 						default:
 							//
 						}
@@ -234,4 +236,13 @@ func handleSessionHistoryEvent(jsonPayload string) {
 	if len(messages) > 0 {
 		tuiSendSessionHistory(messages)
 	}
+}
+
+func handleEventHandlersEvent(jsonPayload string) {
+	var handlers []cleverchatty.EventHandlerInfo
+	if err := json.Unmarshal([]byte(jsonPayload), &handlers); err != nil {
+		tuiSendChat(errorStyle.Render(fmt.Sprintf("Error parsing event handlers: %v", err)) + "\n")
+		return
+	}
+	tuiSendEventHandlers(handlers)
 }

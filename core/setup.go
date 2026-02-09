@@ -414,6 +414,14 @@ func (assistant *CleverChatty) GetToolsInfo() []ServerInfo {
 	return assistant.toolsHost.getToolsInfo()
 }
 
+func (assistant *CleverChatty) GetEventHandlers() []EventHandlerInfo {
+	registry := assistant.toolsHost.GetNotificationTypeRegistry()
+	if registry == nil {
+		return nil
+	}
+	return registry.GetAllEventHandlers()
+}
+
 func (assistant *CleverChatty) GetMessages() []history.HistoryMessage {
 	return assistant.messages
 }

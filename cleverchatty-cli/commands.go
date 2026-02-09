@@ -37,6 +37,9 @@ func handleSlashCommand(prompt string, cleverChattyObject cleverchatty.CleverCha
 	case "/servers":
 		handleServersCommand(cleverChattyObject)
 		return true, nil
+	case "/event-handlers":
+		handleEventHandlersCommand(cleverChattyObject)
+		return true, nil
 	case "/quit", "/bye", "/exit":
 		tuiPrint("\nGoodbye!\n")
 		if useTUIMode {
@@ -57,7 +60,7 @@ func handleSlashCommandAsClient(prompt string, a2aClient a2aclient.A2AClient, ct
 
 	cleanPrompt := strings.ToLower(strings.TrimSpace(prompt))
 
-	if cleanPrompt == "/servers" || cleanPrompt == "/tools" || cleanPrompt == "/history" {
+	if cleanPrompt == "/servers" || cleanPrompt == "/tools" || cleanPrompt == "/history" || cleanPrompt == "/event-handlers" {
 		// These commands should be processed on the server side
 		return false, nil
 	}
@@ -138,6 +141,7 @@ func handleHelpCommand() {
 	markdown.WriteString("- **/tools**: List all available tools\n")
 	markdown.WriteString("- **/servers**: List configured MCP servers\n")
 	markdown.WriteString("- **/history**: Display conversation history\n")
+	markdown.WriteString("- **/event-handlers**: Show notification event handlers\n")
 	markdown.WriteString("- **/sessions**: List all active sessions (client mode)\n")
 	markdown.WriteString("- **/session <id>**: Switch to a different session (client mode)\n")
 	markdown.WriteString("- **/bye**: Disconnect (preserve session for reconnecting)\n")
@@ -265,6 +269,75 @@ func handleServersCommand(cleverChattyObject cleverchatty.CleverChatty) {
 		MarginRight(4)
 
 	// Wrap the rendered content in the container
+	tuiPrint("\n" + containerStyle.Render(rendered) + "\n")
+}
+
+func handleEventHandlersCommand(cleverChattyObject cleverchatty.CleverChatty) {
+	if err := updateRenderer(); err != nil {
+		tuiPrint(
+			"\n" + errorStyle.Render(fmt.Sprintf("Error updating renderer: %v", err)) + "\n",
+		)
+		return
+	}
+
+	var markdown strings.Builder
+	action := func() {
+		handlers := cleverChattyObject.GetEventHandlers()
+		if len(handlers) == 0 {
+			markdown.WriteString("No event handlers registered.\n")
+		} else {
+			markdown.WriteString("# Event Handlers\n\n")
+			// Group by server name
+			grouped := make(map[string][]cleverchatty.EventHandlerInfo)
+			var serverOrder []string
+			for _, h := range handlers {
+				if _, exists := grouped[h.ServerName]; !exists {
+					serverOrder = append(serverOrder, h.ServerName)
+				}
+				grouped[h.ServerName] = append(grouped[h.ServerName], h)
+			}
+			for _, serverName := range serverOrder {
+				serverHandlers := grouped[serverName]
+				markdown.WriteString(fmt.Sprintf("## %s\n\n", serverName))
+				for _, h := range serverHandlers {
+					markdown.WriteString(fmt.Sprintf("### %s\n\n", h.NotificationName))
+					if h.Description != "" {
+						markdown.WriteString(fmt.Sprintf("*%s*\n\n", h.Description))
+					}
+					if h.Kind != "" {
+						markdown.WriteString(fmt.Sprintf("**Kind:** %s\n\n", h.Kind))
+					}
+					markdown.WriteString("**Instructions:**\n")
+					for _, instr := range h.Instructions {
+						markdown.WriteString(fmt.Sprintf("- %s\n", instr))
+					}
+					markdown.WriteString("\n")
+				}
+			}
+		}
+	}
+
+	if !useTUIMode {
+		_ = spinner.New().
+			Title("Loading event handlers...").
+			Action(action).
+			Run()
+	} else {
+		action()
+	}
+
+	rendered, err := renderer.Render(markdown.String())
+	if err != nil {
+		tuiPrint(
+			"\n" + errorStyle.Render(fmt.Sprintf("Error rendering event handlers: %v", err)) + "\n",
+		)
+		return
+	}
+
+	containerStyle := lipgloss.NewStyle().
+		MarginLeft(4).
+		MarginRight(4)
+
 	tuiPrint("\n" + containerStyle.Render(rendered) + "\n")
 }
 

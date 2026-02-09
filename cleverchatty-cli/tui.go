@@ -39,6 +39,9 @@ type sessionSwitchedMsg struct {
 type sessionHistoryMsg struct {
 	messages []cleverchatty.SessionHistoryMessage
 }
+type eventHandlersMsg struct {
+	handlers []cleverchatty.EventHandlerInfo
+}
 
 // TUI model
 type tuiModel struct {
@@ -359,6 +362,15 @@ func (m tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.chatViewport.GotoBottom()
 		}
 
+	case eventHandlersMsg:
+		text := formatEventHandlers(msg.handlers)
+		if m.ready && m.chatViewport.Width > 0 {
+			text = wordwrap.String(text, m.chatViewport.Width)
+		}
+		m.chatContent.WriteString(text)
+		m.chatViewport.SetContent(m.chatContent.String())
+		m.chatViewport.GotoBottom()
+
 	case quitMsg:
 		return m, tea.Quit
 	}
@@ -547,6 +559,57 @@ func tuiSendSessionHistory(messages []cleverchatty.SessionHistoryMessage) {
 	if program != nil {
 		program.Send(sessionHistoryMsg{messages: messages})
 	}
+}
+
+func tuiSendEventHandlers(handlers []cleverchatty.EventHandlerInfo) {
+	if program != nil {
+		program.Send(eventHandlersMsg{handlers: handlers})
+	}
+}
+
+// formatEventHandlers formats event handlers for display
+func formatEventHandlers(handlers []cleverchatty.EventHandlerInfo) string {
+	var b strings.Builder
+	separator := separatorStyle.Render("─────────────────────────────────────────────────")
+	titleStyle := lipgloss.NewStyle().Foreground(tokyoCyan).Bold(true)
+	serverStyle := lipgloss.NewStyle().Foreground(tokyoPurple).Bold(true)
+	nameStyle := lipgloss.NewStyle().Foreground(tokyoFg)
+	instrStyle := lipgloss.NewStyle().Foreground(tokyoGreen)
+
+	b.WriteString(fmt.Sprintf("\n%s\n%s\n\n", separator, titleStyle.Render("Event Handlers")))
+
+	if len(handlers) == 0 {
+		b.WriteString("  No event handlers registered.\n")
+	} else {
+		// Group by server name (handlers are already sorted by GetAllEventHandlers)
+		grouped := make(map[string][]cleverchatty.EventHandlerInfo)
+		var serverOrder []string
+		for _, h := range handlers {
+			if _, exists := grouped[h.ServerName]; !exists {
+				serverOrder = append(serverOrder, h.ServerName)
+			}
+			grouped[h.ServerName] = append(grouped[h.ServerName], h)
+		}
+		for _, serverName := range serverOrder {
+			serverHandlers := grouped[serverName]
+			b.WriteString(fmt.Sprintf("  %s\n", serverStyle.Render(serverName)))
+			for _, h := range serverHandlers {
+				b.WriteString(fmt.Sprintf("    %s", nameStyle.Render(h.NotificationName)))
+				if h.Kind != "" {
+					b.WriteString(fmt.Sprintf(" (%s)", h.Kind))
+				}
+				b.WriteString("\n")
+				if h.Description != "" {
+					b.WriteString(fmt.Sprintf("      %s\n", h.Description))
+				}
+				for _, instr := range h.Instructions {
+					b.WriteString(fmt.Sprintf("      %s %s\n", instrStyle.Render("->"), instr))
+				}
+			}
+			b.WriteString("\n")
+		}
+	}
+	return b.String()
 }
 
 // formatSessionsList formats a list of sessions for display

@@ -231,6 +231,15 @@ func (sm *SessionManager) GetSessionsList() []SessionInfo {
 	return list
 }
 
+// GetEventHandlers returns notification event handlers for a session.
+func (sm *SessionManager) GetEventHandlers(id string) ([]EventHandlerInfo, error) {
+	session, err := sm.GetSession(id)
+	if err != nil {
+		return nil, err
+	}
+	return session.AI.GetEventHandlers(), nil
+}
+
 // GetSessionHistory returns the user/assistant text messages for a session.
 func (sm *SessionManager) GetSessionHistory(id string) ([]SessionHistoryMessage, error) {
 	session, err := sm.GetSession(id)

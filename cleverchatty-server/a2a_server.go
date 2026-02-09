@@ -184,6 +184,9 @@ func (a *A2AServer) ProcessMessage(
 		if prompt == "/__get_history__" {
 			return a.handleGetHistoryCommand(options, handle, actualSessionID)
 		}
+		if prompt == "/event-handlers" {
+			return a.handleEventHandlersCommand(options, handle, actualSessionID)
+		}
 		if strings.HasPrefix(prompt, "/__quit_session__ ") {
 			targetID := strings.TrimSpace(strings.TrimPrefix(prompt, "/__quit_session__ "))
 			a.SessionsManager.FinishSession(targetID)
@@ -520,6 +523,65 @@ func (a *A2AServer) handleGetHistoryCommand(
 		defer subscriber.Close()
 
 		a.statusUpdate(cleverchatty.CallbackCodeSessionHistory, string(jsonBytes), "", taskID, sessionID, subscriber)
+
+		completeEvent := a2aprotocol.StreamingMessageEvent{
+			Result: &a2aprotocol.TaskStatusUpdateEvent{
+				TaskID:    taskID,
+				ContextID: sessionID,
+				Kind:      "status-update",
+				Status: a2aprotocol.TaskStatus{
+					State: a2aprotocol.TaskStateCompleted,
+					Message: &a2aprotocol.Message{
+						MessageID: uuid.New().String(),
+						Kind:      "message",
+						Role:      a2aprotocol.MessageRoleAgent,
+						Parts:     []a2aprotocol.Part{a2aprotocol.NewTextPart("done")},
+					},
+				},
+				Final: true,
+			},
+		}
+		subscriber.Send(completeEvent)
+	}()
+
+	return &a2ataskmanager.MessageProcessingResult{
+		StreamingEvents: subscriber,
+	}, nil
+}
+
+// handleEventHandlersCommand sends the list of notification event handlers as a streaming event
+func (a *A2AServer) handleEventHandlersCommand(
+	options a2ataskmanager.ProcessOptions,
+	handle a2ataskmanager.TaskHandler,
+	sessionID string,
+) (*a2ataskmanager.MessageProcessingResult, error) {
+	handlers, err := a.SessionsManager.GetEventHandlers(sessionID)
+	if err != nil {
+		handlers = []cleverchatty.EventHandlerInfo{}
+	}
+
+	jsonBytes, err := json.Marshal(handlers)
+	if err != nil {
+		return nil, fmt.Errorf("failed to marshal event handlers: %w", err)
+	}
+
+	if !options.Streaming {
+		return a.buildTextMessageResponse(string(jsonBytes)), nil
+	}
+
+	taskID, err := handle.BuildTask(nil, nil)
+	if err != nil {
+		return nil, fmt.Errorf("failed to build task: %w", err)
+	}
+	subscriber, err := handle.SubScribeTask(&taskID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to subscribe to task: %w", err)
+	}
+
+	go func() {
+		defer subscriber.Close()
+
+		a.statusUpdate(cleverchatty.CallbackCodeEventHandlers, string(jsonBytes), "", taskID, sessionID, subscriber)
 
 		completeEvent := a2aprotocol.StreamingMessageEvent{
 			Result: &a2aprotocol.TaskStatusUpdateEvent{

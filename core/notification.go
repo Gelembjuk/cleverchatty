@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -77,6 +78,16 @@ type NotificationType struct {
 type NotificationSubscription struct {
 	Key          string   `json:"key"`
 	Instructions []string `json:"instructions"`
+}
+
+// EventHandlerInfo represents a notification event handler for display purposes.
+// It combines subscription data with the notification type metadata.
+type EventHandlerInfo struct {
+	ServerName       string   `json:"server_name"`
+	NotificationName string   `json:"notification_name"`
+	Description      string   `json:"description"`
+	Kind             string   `json:"kind"`
+	Instructions     []string `json:"instructions"`
 }
 
 // NotificationTypeRegistry maintains a registry of notification types per server
@@ -220,6 +231,44 @@ func (r *NotificationTypeRegistry) GetAllSubscriptions() map[string]*Notificatio
 		result[k] = v
 	}
 	return result
+}
+
+// GetAllEventHandlers returns a combined view of all subscriptions with their type metadata,
+// sorted by server name for consistent display.
+func (r *NotificationTypeRegistry) GetAllEventHandlers() []EventHandlerInfo {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+
+	var handlers []EventHandlerInfo
+	for key, sub := range r.subscriptions {
+		serverName, notifName, err := ParseNotificationKey(key)
+		if err != nil {
+			continue
+		}
+		description := ""
+		kind := ""
+		for _, nt := range r.types[serverName] {
+			if nt.Name == notifName {
+				description = nt.Description
+				kind = string(nt.Kind)
+				break
+			}
+		}
+		handlers = append(handlers, EventHandlerInfo{
+			ServerName:       serverName,
+			NotificationName: notifName,
+			Description:      description,
+			Kind:             kind,
+			Instructions:     sub.Instructions,
+		})
+	}
+	sort.Slice(handlers, func(i, j int) bool {
+		if handlers[i].ServerName != handlers[j].ServerName {
+			return handlers[i].ServerName < handlers[j].ServerName
+		}
+		return handlers[i].NotificationName < handlers[j].NotificationName
+	})
+	return handlers
 }
 
 // FormatForToolDescription returns a human-readable listing of all registered

@@ -221,6 +221,8 @@ func (assistant *CleverChatty) processPrompt(prompt string) (string, error) {
 	backoff := initialBackoff
 	retries := 0
 
+	assistant.logger.Printf("Processing prompt: %s\n", prompt)
+
 	// Convert MessageParam to llm.Message for provider
 	// Messages already implement llm.Message interface
 	llmMessages := make([]llm.Message, len(assistant.messages))
@@ -291,6 +293,7 @@ func (assistant *CleverChatty) processPrompt(prompt string) (string, error) {
 
 	// Add text content
 	if message.GetContent() != "" {
+		assistant.logger.Printf("Message 1 received: %s\n", message.GetContent())
 		assistant.Callbacks.CallResponseReceived(message.GetContent())
 
 		messageContent = append(messageContent, history.ContentBlock{

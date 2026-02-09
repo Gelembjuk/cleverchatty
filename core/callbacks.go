@@ -11,6 +11,7 @@ var (
 	CallbackCodeSessionsList     = "sessions_list"
 	CallbackCodeSessionSwitched  = "session_switched"
 	CallbackCodeSessionHistory   = "session_history"
+	CallbackCodeEventHandlers    = "event_handlers"
 )
 
 type UICallbacks struct {
