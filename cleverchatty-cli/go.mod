@@ -10,8 +10,7 @@ require (
 	github.com/charmbracelet/huh v0.7.0
 	github.com/charmbracelet/huh/spinner v0.0.0-20250414191420-151ba059f6ea
 	github.com/charmbracelet/lipgloss v1.1.1-0.20250404203927-76690c660834
-	github.com/gelembjuk/cleverchatty/core v0.4.3
-	github.com/google/uuid v1.6.0
+	github.com/gelembjuk/cleverchatty/core v0.4.4
 	github.com/mark3labs/mcphost v0.6.0
 	github.com/muesli/reflow v0.3.0
 	github.com/spf13/cobra v1.9.1
@@ -57,6 +56,7 @@ require (
 	github.com/gomarkdown/markdown v0.0.0-20191123064959-2c17d62f5098 // indirect
 	github.com/google/generative-ai-go v0.19.0 // indirect
 	github.com/google/s2a-go v0.1.9 // indirect
+	github.com/google/uuid v1.6.0 // indirect
 	github.com/googleapis/enterprise-certificate-proxy v0.3.6 // indirect
 	github.com/googleapis/gax-go/v2 v2.14.1 // indirect
 	github.com/gorilla/css v1.0.1 // indirect
